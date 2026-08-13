@@ -1,0 +1,10 @@
+"use client";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { mockOpportunities } from "@/data/mock-opportunities";
+import { mockProfile, mockSkills } from "@/data/mock-profile";
+import { mockRadars } from "@/data/mock-radars";
+import type { Opportunity, OpportunityStatus, Profile, Radar, Skill } from "@/types/domain";
+type AppState = { opportunities: Opportunity[]; radars: Radar[]; profile: Profile; skills: Skill[]; updateOpportunity: (id: string, status: OpportunityStatus) => void; toggleSaved: (id: string) => void; toggleSkill: (id: string) => void; toggleRadar: (id: string) => void; addRadar: (radar: Radar) => void; updateProfile: (profile: Profile) => void; reset: () => void; };
+const seed = { opportunities: mockOpportunities, radars: mockRadars, profile: mockProfile, skills: mockSkills };
+export const useOpportunityStore = create<AppState>()(persist((set) => ({ ...seed, updateOpportunity: (id, status) => set((state) => ({ opportunities: state.opportunities.map((item) => item.id === id ? { ...item, status } : item) })), toggleSaved: (id) => set((state) => ({ opportunities: state.opportunities.map((item) => item.id === id ? { ...item, status: item.status === "saved" ? "new" : "saved" } : item) })), toggleSkill: (id) => set((state) => ({ skills: state.skills.map((item) => item.id === id ? { ...item, installed: !item.installed } : item) })), toggleRadar: (id) => set((state) => ({ radars: state.radars.map((item) => item.id === id ? { ...item, status: item.status === "running" ? "paused" : "running" } : item) })), addRadar: (radar) => set((state) => ({ radars: [radar, ...state.radars] })), updateProfile: (profile) => set({ profile }), reset: () => set(seed) }), { name: "opportunity-radar-v1" }));

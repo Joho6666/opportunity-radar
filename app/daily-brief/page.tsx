@@ -1,0 +1,7 @@
+"use client";
+import { AppShell } from "@/components/app-shell";
+import { OpportunityCard } from "@/components/opportunity-card";
+import { MetricCard, PageHeader, Panel } from "@/components/ui";
+import { mockBrief } from "@/data/mock-profile";
+import { useOpportunityStore } from "@/stores/use-opportunity-store";
+export default function DailyBrief(){const items=useOpportunityStore(s=>s.opportunities);const date=new Intl.DateTimeFormat("zh-CN",{dateStyle:"full"}).format(new Date());return <AppShell><PageHeader title="每日机会简报" description={date}/><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[["今日扫描",mockBrief.scanned],["发现机会",mockBrief.found],["强烈推荐",mockBrief.recommended],["潜在收入",`¥${mockBrief.potentialIncome[0]}–${mockBrief.potentialIncome[1]}`]].map(([l,v])=><MetricCard key={String(l)} label={String(l)} value={String(v)}/>)}</div><div className="mt-6 grid gap-6 xl:grid-cols-[1fr_320px]"><div><h2 className="mb-3 font-semibold">今日最值得行动</h2><div className="space-y-3">{items.slice(0,3).map(x=><OpportunityCard key={x.id} opportunity={x}/>)}</div></div><div className="space-y-5"><Panel className="p-5"><h2 className="font-semibold">今日趋势</h2>{mockBrief.trends.map(x=><p className="mt-3 text-sm text-muted" key={x}>{x}</p>)}</Panel><Panel className="p-5"><h2 className="font-semibold">今天不建议做</h2><p className="mt-3 text-sm text-amber-100">{mockBrief.avoid}</p></Panel><Panel className="p-5"><h2 className="font-semibold">AI 建议你今天优先做</h2>{mockBrief.actions.map((x,i)=><p className="mt-3 text-sm" key={x}>{i+1}. {x}</p>)}</Panel></div></div></AppShell>}
