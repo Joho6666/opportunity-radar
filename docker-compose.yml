@@ -1,0 +1,9 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8011:8011"]
+    env_file: ./backend/.env
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    profiles: ["workers"]

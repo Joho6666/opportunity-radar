@@ -1,0 +1,10 @@
+project_id = "opportunity-radar"
+
+[api]
+port = 55421
+
+[db]
+port = 55422
+
+[studio]
+port = 55423
