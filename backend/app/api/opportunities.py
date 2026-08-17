@@ -19,7 +19,8 @@ async def list_opportunities(type: str | None = None, source: str | None = None,
 @router.get("/{opportunity_id}", response_model=OpportunityRead)
 async def get_opportunity(opportunity_id: str, user: CurrentUser = Depends(get_current_user), repo: MemoryRepository = Depends(get_repository)): return repo.get_opportunity(user.id, opportunity_id)
 async def action(opportunity_id: str, new_status: str, payload: OpportunityAction, user: CurrentUser, repo: MemoryRepository) -> OpportunityRead:
-    item = repo.get_opportunity(user.id, opportunity_id); return repo.save_opportunity(item.model_copy(update={"status":new_status}))
+    item = repo.get_opportunity(user.id, opportunity_id); repo.record_action(opportunity_id, payload)
+    return repo.save_opportunity(item.model_copy(update={"status": new_status}))
 @router.post("/{opportunity_id}/save", response_model=OpportunityRead)
 async def save(opportunity_id: str, payload: OpportunityAction, user: CurrentUser = Depends(get_current_user), repo: MemoryRepository = Depends(get_repository)): return await action(opportunity_id,"saved",payload,user,repo)
 @router.post("/{opportunity_id}/contact", response_model=OpportunityRead)

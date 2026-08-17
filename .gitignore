@@ -8,3 +8,5 @@ out/
 !.env.example
 *.log
 .DS_Store
+outputs/
+work/

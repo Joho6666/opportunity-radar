@@ -57,6 +57,16 @@ class RadarCreate(BaseModel):
     sources: list[Literal["mock", "public_web"]] = ["mock"]
 
 
+class RadarRunStats(BaseModel):
+    queries: int = 0
+    items_found: int = 0
+    duplicates_removed: int = 0
+    analyzed: int = 0
+    opportunities_found: int = 0
+    matched: int = 0
+    recommended: int = 0
+
+
 class RadarRead(RadarCreate):
     id: str
     user_id: str
@@ -64,6 +74,15 @@ class RadarRead(RadarCreate):
     queries: list[QueryPlanItem] = []
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None
+    stats: RadarRunStats = Field(default_factory=RadarRunStats)
+
+
+class RadarRunRead(BaseModel):
+    id: str
+    radar_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    stats: RadarRunStats
+    error_message: str | None = None
 
 
 class RawItem(BaseModel):
@@ -129,24 +148,6 @@ class OpportunityAction(BaseModel):
     actual_revenue: int | None = Field(default=None, ge=0)
     actual_hours: float | None = Field(default=None, ge=0)
     closed_at: datetime | None = None
-
-
-class RadarRunStats(BaseModel):
-    queries: int = 0
-    items_found: int = 0
-    duplicates_removed: int = 0
-    analyzed: int = 0
-    opportunities_found: int = 0
-    matched: int = 0
-    recommended: int = 0
-
-
-class RadarRunRead(BaseModel):
-    id: str
-    radar_id: str
-    status: Literal["queued", "running", "completed", "failed"]
-    stats: RadarRunStats
-    error_message: str | None = None
 
 
 class DailyBriefRead(BaseModel):
