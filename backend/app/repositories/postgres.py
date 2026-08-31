@@ -511,3 +511,22 @@ class PostgresRepository:
                 {"now": now},
             ).mappings().all()
             return [(row["user_id"], row["radar_id"]) for row in rows]
+
+    def record_llm_call(self, user_id: str | None, radar_id: str | None, run_id: str | None, provider: str | None, model: str, latency_ms: int, fallbacked: bool, schema_name: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO llm_calls (user_id, radar_id, run_id, provider, model, latency_ms, fallbacked, schema_name) "
+                    "VALUES (CAST(:user_id AS uuid), CAST(:radar_id AS uuid), CAST(:run_id AS uuid), :provider, :model, :latency_ms, :fallbacked, :schema_name)"
+                ),
+                {
+                    "user_id": as_uuid(user_id) if user_id else None,
+                    "radar_id": as_uuid(radar_id) if radar_id else None,
+                    "run_id": as_uuid(run_id) if run_id else None,
+                    "provider": provider,
+                    "model": model,
+                    "latency_ms": latency_ms,
+                    "fallbacked": fallbacked,
+                    "schema_name": schema_name,
+                },
+            )

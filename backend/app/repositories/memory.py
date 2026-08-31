@@ -21,6 +21,7 @@ class MemoryRepository:
         self.runs: dict[str, RadarRunRead] = {}
         self.actions: dict[str, OpportunityAction] = {}
         self.action_log: list[tuple[str, str, OpportunityAction]] = []
+        self.llm_calls: list[dict] = []
         self._raw_urls: dict[str, set[str]] = defaultdict(set)
 
     def get_profile(self, user_id: str) -> ProfileRead:
@@ -153,6 +154,9 @@ class MemoryRepository:
             if radar.next_run_at is None or radar.next_run_at <= now:
                 due.append((radar.user_id, radar.id))
         return due
+
+    def record_llm_call(self, user_id: str | None, radar_id: str | None, run_id: str | None, provider: str | None, model: str, latency_ms: int, fallbacked: bool, schema_name: str) -> None:
+        self.llm_calls.append({"user_id": user_id, "radar_id": radar_id, "run_id": run_id, "provider": provider, "model": model, "latency_ms": latency_ms, "fallbacked": fallbacked, "schema_name": schema_name})
 
 
 repository = MemoryRepository()
