@@ -7,12 +7,16 @@ def normalized_text(value: str) -> str:
     return re.sub(r"\W+", "", value.lower()).strip()
 
 
+def hash_url(url: str) -> str:
+    return hashlib.sha256(url.split("?")[0].lower().encode()).hexdigest()
+
+
 def content_hash(item: RawItem) -> str:
     return hashlib.sha256(normalized_text(f"{item.title}|{item.content}").encode()).hexdigest()
 
 
 def url_hash(item: RawItem) -> str:
-    return hashlib.sha256(item.url.split("?")[0].lower().encode()).hexdigest()
+    return hash_url(item.url)
 
 
 def deduplicate(items: list[RawItem]) -> tuple[list[RawItem], int]:

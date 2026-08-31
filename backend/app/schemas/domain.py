@@ -83,6 +83,8 @@ class RadarRunRead(BaseModel):
     status: Literal["queued", "running", "completed", "failed"]
     stats: RadarRunStats
     error_message: str | None = None
+    error_code: str | None = None
+    collector_errors: list[dict] = Field(default_factory=list)
 
 
 class RawItem(BaseModel):

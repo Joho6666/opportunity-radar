@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 from ..collectors.mock import MockCollector
-from ..repositories.memory import MemoryRepository
+from ..repositories.base import Repository
 from ..schemas.domain import OpportunityRead, RadarRunStats
 from .ai_service import analyze_raw_item, plan_queries
 from .dedup_service import deduplicate
@@ -9,7 +9,7 @@ from .score_engine import calculate_score
 
 
 class RadarRunService:
-    def __init__(self, repository: MemoryRepository) -> None: self.repository = repository; self.collector = MockCollector()
+    def __init__(self, repository: Repository) -> None: self.repository = repository; self.collector = MockCollector()
     async def run(self, user_id: str, radar_id: str, run_id: str):
         radar = self.repository.get_radar(user_id, radar_id); profile = self.repository.get_profile(user_id)
         run = self.repository.get_run(user_id, run_id).model_copy(update={"status": "running"}); self.repository.save_run(run)
