@@ -191,7 +191,7 @@ class PostgresRepository:
         rid = str(row["id"])
         keywords = [item["keyword"] for item in conn.execute(text("SELECT keyword FROM radar_keywords WHERE radar_id=CAST(:rid AS uuid)"), {"rid": rid}).mappings()]
         locations = [item["location"] for item in conn.execute(text("SELECT location FROM radar_locations WHERE radar_id=CAST(:rid AS uuid)"), {"rid": rid}).mappings()]
-        allowed = {"mock", "public_web"}
+        allowed = {"mock", "public_web", "github", "hackernews", "rss", "web_search"}
         sources = [item["slug"] for item in conn.execute(text("SELECT s.slug FROM radar_sources rs JOIN sources s ON s.id=rs.source_id WHERE rs.radar_id=CAST(:rid AS uuid)"), {"rid": rid}).mappings() if item["slug"] in allowed]
         queries = [QueryPlanItem(query=item["query"], source=item["source"] if item["source"] in allowed else "mock", priority=item["priority"]) for item in conn.execute(text("SELECT query, source, priority FROM radar_queries WHERE radar_id=CAST(:rid AS uuid) ORDER BY priority DESC"), {"rid": rid}).mappings()]
         stats_raw = row["last_stats"] if "last_stats" in row.keys() else {}

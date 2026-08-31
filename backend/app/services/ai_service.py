@@ -31,16 +31,28 @@ async def analyze_profile(request: ProfileAnalyzeRequest) -> ProfileAnalysis:
 
 
 async def plan_queries(radar: RadarCreate) -> list[QueryPlanItem]:
-    prompt = f"为机会雷达生成搜索查询计划。目标：{radar.goal}；关键词：{radar.keywords}；地区：{radar.locations}。生成不超过 10 条查询，source 固定为 mock。"
-    payload = await _llm_structured(prompt, "queries: {{query: string, source: 'mock', priority: number(0-100)}}[]，键名为 queries")
+    sources = radar.sources or ["mock"]
+    prompt = f"为机会雷达生成搜索查询计划。目标：{radar.goal}；关键词：{radar.keywords}；地区：{radar.locations}；来源：{sources}。生成不超过 10 条查询，source 必须来自已选来源。"
+    payload = await _llm_structured(prompt, "queries: {{query: string, source: string, priority: number(0-100)}}[]，键名为 queries")
     if payload is not None and isinstance(payload.get("queries"), list):
         try:
             queries = TypeAdapter(list[QueryPlanItem]).validate_python(payload["queries"])
-            if queries: return queries
-        except Exception: pass
-    tokens = radar.keywords or re.findall(r"PPT|AI 自动化|n8n|小程序|网站开发", radar.goal) or ["兼职"]
+            queries = [item for item in queries if item.source in sources] or queries
+            if queries:
+                return queries[:10]
+        except Exception:
+            pass
+    tokens = radar.keywords or re.findall(r"PPT|AI 自动化|n8n|小程序|网站开发|AI Agent", radar.goal) or ["兼职"]
     locations = radar.locations or (["桂林", "远程"] if "桂林" in radar.goal else ["线上"])
-    output = [QueryPlanItem(query=f"{location} {skill} 有偿", source="mock", priority=max(70, 92-index*3)) for index, (location, skill) in enumerate((pair for location in locations for pair in [(location, skill) for skill in tokens]))]
+    output: list[QueryPlanItem] = []
+    index = 0
+    for source in sources:
+        for location in locations:
+            for skill in tokens:
+                output.append(QueryPlanItem(query=f"{location} {skill} 有偿", source=source, priority=max(70, 92 - index * 3)))
+                index += 1
+                if len(output) >= 10:
+                    return output
     return output[:10]
 
 

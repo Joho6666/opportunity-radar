@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl
 OpportunityType = Literal["job", "client", "project", "business", "github"]
 OpportunityStatus = Literal["new", "saved", "contacted", "negotiating", "won", "lost", "ignored"]
 RadarStatus = Literal["active", "paused", "running", "error"]
+SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search"]
 
 
 class SkillInput(BaseModel):
@@ -41,7 +42,7 @@ class ProfileAnalysis(BaseModel):
 
 class QueryPlanItem(BaseModel):
     query: str
-    source: Literal["mock", "public_web"] = "mock"
+    source: SourceSlug = "mock"
     priority: int = Field(ge=0, le=100)
 
 
@@ -54,7 +55,7 @@ class RadarCreate(BaseModel):
     freshness_hours: int = Field(default=72, ge=1, le=720)
     keywords: list[str] = []
     locations: list[str] = []
-    sources: list[Literal["mock", "public_web"]] = ["mock"]
+    sources: list[SourceSlug] = ["mock"]
 
 
 class RadarRunStats(BaseModel):
