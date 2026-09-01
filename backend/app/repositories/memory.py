@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from uuid import uuid4
 from ..core.errors import AppError
-from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, ProfileRead, ProfileUpsert, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem
+from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem
 from ..services.dedup_service import hash_url
 from ..services.income import potential_income_range
 
@@ -22,6 +22,8 @@ class MemoryRepository:
         self.actions: dict[str, OpportunityAction] = {}
         self.action_log: list[tuple[str, str, OpportunityAction]] = []
         self.llm_calls: list[dict] = []
+        self.events: list[dict] = []
+        self.preferences: dict[str, PreferenceState] = {}
         self._raw_urls: dict[str, set[str]] = defaultdict(set)
 
     def get_profile(self, user_id: str) -> ProfileRead:
@@ -157,6 +159,16 @@ class MemoryRepository:
 
     def record_llm_call(self, user_id: str | None, radar_id: str | None, run_id: str | None, provider: str | None, model: str, latency_ms: int, fallbacked: bool, schema_name: str) -> None:
         self.llm_calls.append({"user_id": user_id, "radar_id": radar_id, "run_id": run_id, "provider": provider, "model": model, "latency_ms": latency_ms, "fallbacked": fallbacked, "schema_name": schema_name})
+
+    def get_preference(self, user_id: str) -> PreferenceState:
+        return self.preferences.get(user_id, PreferenceState()).model_copy(deep=True)
+
+    def save_preference(self, user_id: str, state: PreferenceState) -> PreferenceState:
+        self.preferences[user_id] = state.model_copy(deep=True)
+        return self.preferences[user_id]
+
+    def record_event(self, user_id: str, opportunity_id: str | None, event: str, metadata: dict | None = None) -> None:
+        self.events.append({"user_id": user_id, "opportunity_id": opportunity_id, "event": event, "metadata": metadata or {}})
 
 
 repository = MemoryRepository()

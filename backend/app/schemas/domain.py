@@ -164,3 +164,13 @@ class DailyBriefRead(BaseModel):
     signals: list[str]
     avoid: list[str]
     actions: list[str]
+
+
+class PreferenceState(BaseModel):
+    skill_weights: dict[str, float] = Field(default_factory=dict)
+    type_weights: dict[str, float] = Field(default_factory=dict)
+    source_weights: dict[str, float] = Field(default_factory=dict)
+    location_weights: dict[str, float] = Field(default_factory=dict)
+    keyword_weights: dict[str, float] = Field(default_factory=dict)
+    min_budget_hint: int | None = None
+    recommendation_threshold: int | None = None

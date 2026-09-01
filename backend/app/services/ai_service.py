@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import TypeAdapter
 from ..ai.provider import get_provider
 from ..core.config import get_settings
-from ..schemas.domain import OpportunityAnalysis, ProfileAnalysis, ProfileAnalyzeRequest, QueryPlanItem, RadarCreate, RawItem
+from ..schemas.domain import OpportunityAnalysis, PreferenceState, ProfileAnalysis, ProfileAnalyzeRequest, QueryPlanItem, RadarCreate, RawItem
 from .risk_rules import risk_adjustment
 
 logger = logging.getLogger(__name__)
@@ -80,8 +80,10 @@ async def analyze_profile(request: ProfileAnalyzeRequest) -> ProfileAnalysis:
     return ProfileAnalysis(identity=["student"] if "学生" in text or "大学" in text else ["freelancer"], skills=skills, goals=goals, recommended_directions=["AI 自动化外包", "远程 AI 实习", "PPT 项目", "小型 Web 项目"])
 
 
-async def plan_queries(radar: RadarCreate) -> list[QueryPlanItem]:
+async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = None) -> list[QueryPlanItem]:
     sources = radar.sources or ["mock"]
+    if preference:
+        sources = sorted(sources, key=lambda slug: preference.source_weights.get(slug, 0.0), reverse=True)
     prompt = f"为机会雷达生成搜索查询计划。目标：{radar.goal}；关键词：{radar.keywords}；地区：{radar.locations}；来源：{sources}。生成不超过 10 条查询，source 必须来自已选来源。"
     payload = await _llm_structured(prompt, "queries: {{query: string, source: string, priority: number(0-100)}}[]，键名为 queries")
     if payload is not None and isinstance(payload.get("queries"), list):
@@ -93,7 +95,13 @@ async def plan_queries(radar: RadarCreate) -> list[QueryPlanItem]:
         except Exception:
             pass
     tokens = radar.keywords or re.findall(r"PPT|AI 自动化|n8n|小程序|网站开发|AI Agent", radar.goal) or ["兼职"]
+    if preference:
+        extra = [key for key, weight in sorted(preference.keyword_weights.items(), key=lambda item: item[1], reverse=True) if weight > 0][:5]
+        tokens = list(dict.fromkeys([*extra, *tokens]))
+        tokens = [token for token in tokens if preference.keyword_weights.get(token, 0) >= -1] or tokens
     locations = radar.locations or (["桂林", "远程"] if "桂林" in radar.goal else ["线上"])
+    if preference:
+        locations = sorted(locations, key=lambda item: preference.location_weights.get(item, 0.0), reverse=True)
     output: list[QueryPlanItem] = []
     index = 0
     for source in sources:

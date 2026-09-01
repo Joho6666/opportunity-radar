@@ -33,7 +33,8 @@ class RadarRunService:
         self.repository.save_run(run)
         token = bind_llm_context(repository=self.repository, user_id=user_id, radar_id=radar.id, run_id=run.id)
         try:
-            queries = radar.queries or await plan_queries(radar)
+            preference = self.repository.get_preference(user_id)
+            queries = radar.queries or await plan_queries(radar, preference)
             radar = radar.model_copy(update={"queries": queries, "status": "running"})
             self.repository.save_radar(radar)
             raw = []
@@ -54,7 +55,7 @@ class RadarRunService:
             for item in fresh:
                 analysis = await analyze_raw_item(item, [skill.name for skill in profile.skills])
                 if analysis.is_opportunity:
-                    score = calculate_score(analysis, radar.minimum_budget)
+                    score = calculate_score(analysis, radar.minimum_budget, preference=preference, source=item.source)
                     hourly = round(analysis.budget_min / analysis.estimated_hours), round(analysis.budget_max / analysis.estimated_hours)
                     opportunity = OpportunityRead(id=str(uuid4()), radar_id=radar.id, type=analysis.type, title=analysis.title, summary=analysis.summary, source=item.source, source_url=item.url, published_at=item.published_at, location=analysis.location, work_mode=analysis.work_mode, budget_min=analysis.budget_min, budget_max=analysis.budget_max, estimated_hours=analysis.estimated_hours, estimated_hourly_rate=hourly, match_score=analysis.skill_match, opportunity_score=score.opportunity_score, conversion_probability=analysis.conversion_probability, risk_score=analysis.risk, recommendation=score.recommendation, status="new", skills=analysis.skills, reasons=analysis.reasons, warnings=analysis.warnings)
                     self.repository.add_opportunity(opportunity, user_id=user_id)

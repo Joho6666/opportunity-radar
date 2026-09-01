@@ -6,9 +6,10 @@ from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 from ..core.errors import AppError
-from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, ProfileRead, ProfileUpsert, QueryPlanItem, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem, SkillInput
+from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, QueryPlanItem, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem, SkillInput
 from ..services.dedup_service import content_hash, hash_url
 from ..services.income import potential_income_range
+from .preference_store import load_preference, store_event, store_preference
 
 
 def as_uuid(value: str) -> str:
@@ -530,3 +531,18 @@ class PostgresRepository:
                     "schema_name": schema_name,
                 },
             )
+
+    def get_preference(self, user_id: str) -> PreferenceState:
+        with self._conn() as conn:
+            return load_preference(conn, as_uuid(user_id))
+
+    def save_preference(self, user_id: str, state: PreferenceState) -> PreferenceState:
+        with self._conn() as conn:
+            self._ensure_user(conn, user_id)
+            store_preference(conn, as_uuid(user_id), state)
+        return state
+
+    def record_event(self, user_id: str, opportunity_id: str | None, event: str, metadata: dict | None = None) -> None:
+        with self._conn() as conn:
+            self._ensure_user(conn, user_id)
+            store_event(conn, as_uuid(user_id), as_uuid(opportunity_id) if opportunity_id else None, event, metadata or {})

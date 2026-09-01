@@ -4,6 +4,7 @@ from ..api.deps import get_current_user, get_repository
 from ..core.security import CurrentUser
 from ..repositories.base import Repository
 from ..schemas.domain import OpportunityAction, OpportunityRead
+from ..services.feedback_service import FeedbackService
 router = APIRouter(prefix="/api/opportunities", tags=["Opportunities"])
 @router.get("", response_model=list[OpportunityRead])
 async def list_opportunities(type: str | None = None, source: str | None = None, location: str | None = None, min_score: int | None = Query(default=None, ge=0, le=100), max_risk: int | None = Query(default=None, ge=0, le=100), status: str | None = None, sort: Literal["recommended", "latest", "score", "budget", "risk"] = "recommended", page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100), user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
@@ -20,7 +21,9 @@ async def list_opportunities(type: str | None = None, source: str | None = None,
 async def get_opportunity(opportunity_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)): return repo.get_opportunity(user.id, opportunity_id)
 async def action(opportunity_id: str, new_status: str, payload: OpportunityAction, user: CurrentUser, repo: Repository) -> OpportunityRead:
     item = repo.get_opportunity(user.id, opportunity_id); repo.record_action(opportunity_id, payload, action=new_status)
-    return repo.save_opportunity(item.model_copy(update={"status": new_status}))
+    saved = repo.save_opportunity(item.model_copy(update={"status": new_status}))
+    FeedbackService(repo).record_event(user.id, saved, new_status)
+    return saved
 @router.post("/{opportunity_id}/save", response_model=OpportunityRead)
 async def save(opportunity_id: str, payload: OpportunityAction, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)): return await action(opportunity_id,"saved",payload,user,repo)
 @router.post("/{opportunity_id}/contact", response_model=OpportunityRead)
@@ -33,3 +36,13 @@ async def win(opportunity_id: str, payload: OpportunityAction, user: CurrentUser
 async def lose(opportunity_id: str, payload: OpportunityAction, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)): return await action(opportunity_id,"lost",payload,user,repo)
 @router.post("/{opportunity_id}/ignore", response_model=OpportunityRead)
 async def ignore(opportunity_id: str, payload: OpportunityAction, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)): return await action(opportunity_id,"ignored",payload,user,repo)
+@router.post("/{opportunity_id}/view", response_model=OpportunityRead)
+async def view(opportunity_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    item = repo.get_opportunity(user.id, opportunity_id)
+    FeedbackService(repo).record_event(user.id, item, "viewed")
+    return item
+@router.post("/{opportunity_id}/apply", response_model=OpportunityRead)
+async def apply(opportunity_id: str, payload: OpportunityAction, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    saved = await action(opportunity_id, "contacted", payload, user, repo)
+    FeedbackService(repo).record_event(user.id, saved, "applied")
+    return saved
