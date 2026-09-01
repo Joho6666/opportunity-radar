@@ -3,12 +3,28 @@ services:
     build: ./backend
     ports: ["8011:8011"]
     env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on: [redis]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
+  worker:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379
+    command: arq app.workers.settings.WorkerSettings
+    depends_on: [redis]
+  scheduler:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379
+    command: python -m app.workers.scheduler
+    depends_on: [redis]
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
-    profiles: ["workers"]
