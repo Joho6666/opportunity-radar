@@ -15,9 +15,13 @@ describe("backend field transforms", () => {
   it("maps RadarRead including stats and status", () => {
     const raw = { id: "r1", name: "雷达", description: "", goal: "g", status: "active", keywords: ["PPT"], locations: ["桂林"], minimum_budget: 200, frequency: "daily", last_run_at: null, next_run_at: null, stats: { items_found: 8, opportunities_found: 4, matched: 3, recommended: 2 } };
     const radar = toRadar(raw);
-    expect(radar.status).toBe("running");
+    expect(radar.status).toBe("active");
     expect(radar.stats).toEqual({ scanned: 8, found: 4, matched: 3, recommended: 2 });
     expect(radar.lastRunAt).toBe("未运行");
+  });
+  it("keeps paused and running statuses distinct from active", () => {
+    expect(toRadar({ id: "r2", name: "x", status: "paused", stats: {} }).status).toBe("paused");
+    expect(toRadar({ id: "r3", name: "x", status: "running", stats: {} }).status).toBe("running");
   });
   it("round-trips profile payloads", () => {
     const payload = fromProfile(mockProfile);

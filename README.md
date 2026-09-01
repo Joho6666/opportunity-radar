@@ -6,11 +6,13 @@
 
 - Landing、Onboarding（偏好持久化）、Dashboard（真实统计）、机会列表与分析详情
 - 机会列表按**类型**筛选（工作/客户/项目/商机/GitHub），按推荐度/最新/预算/风险排序
-- 雷达创建、运行/暂停、搜索策略预览，**运行后真正触发 Mock Collector 闭环**
-- 机会收藏、联系、忽略与 Pipeline 看板/列表联动（收入用**实际成交额**统计）
+- 雷达创建、运行/暂停、搜索策略预览；联机模式走 GitHub / Hacker News / RSS / Web Search 真实采集
+- 机会收藏、联系、忽略与 Pipeline 看板/列表联动（成交收入用**实际成交额**；潜在收入按预算 × 成交概率估算）
 - 每日简报、技能模块、用户画像（可编辑地区/收入/预算/时间）与设置页（重置数据/退出登录）
 - FastAPI Profile、Radar、Opportunity、Pipeline、Daily Brief API 与 OpenAPI 文档
-- Mock Collector → **跨运行去重** → 结构化分析 → 风险规则 → 稳定评分 → Opportunity 的端到端闭环
+- Collector Registry → RawItem 标准化 → **跨运行 PostgreSQL 去重** → LLM 分析 → 风险规则 → 偏好加权评分 → Opportunity
+- Redis + Arq Worker / Scheduler：手动 Run 与 hourly/daily/weekly 定时扫描，Web 重启不丢已入队任务
+- FeedbackService：根据 viewed/saved/ignored/contacted/applied/won/lost 学习关键词与来源偏好
 - **LLM 真实路径**：配置 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL` 后自动接入 OpenAI-compatible 模型，失败时回退确定性分析
 - Supabase PostgreSQL schema、RLS migration、本地 Auth 登录页与可替换服务层
 - 演示模式（`NEXT_PUBLIC_USE_MOCK=true`）开箱即用；联机模式（`false`）启用 middleware 路由保护
@@ -87,8 +89,24 @@ npm run build      # Next.js production build
 
 ```bash
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q  # 11 个测试：引擎、去重、收入、级联、API
+.\.venv\Scripts\python.exe -m pytest -q
 ```
+
+生产/联机建议在 `backend/.env` 中设置：
+
+```
+USE_IN_MEMORY_STORE=false
+DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:55422/postgres
+REDIS_URL=redis://127.0.0.1:6379
+GITHUB_TOKEN=
+FIRECRAWL_API_KEY=
+RSS_FEEDS=https://hnrss.org/newest,https://github.blog/feed/
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=
+```
+
+`USE_IN_MEMORY_STORE=true`（默认）仍可用于无数据库的演示和单测。
 
 ## Docker
 
@@ -97,7 +115,7 @@ Copy-Item backend/.env.example backend/.env
 docker compose up --build
 ```
 
-Redis 是未来后台 worker 的预留服务，可通过 `docker compose --profile workers up` 启动。
+Compose 会启动 API、Redis、Arq worker 与 scheduler。Worker 消费雷达任务；scheduler 每 60 秒把到期且未暂停的雷达入队。
 
 ## CI
 
@@ -106,13 +124,27 @@ Redis 是未来后台 worker 的预留服务，可通过 `docker compose --profi
 ## 架构
 
 ```
+创建雷达（GitHub + HN + RSS + Web）
+  → plan_queries 生成搜索词
+  → Scheduler / 手动 Run 入队 Arq
+  → Worker 抓取真实数据
+  → RawItem 标准化与去重
+  → LLM 分析 + Opportunity Score
+  → PostgreSQL
+  → Dashboard 新机会
+  → 收藏 / 忽略 / 联系
+  → FeedbackService 更新偏好
+  → 下一次扫描更符合用户
+```
+
+```
 app/              → Next.js 页面和 middleware
 components/       → UI 组件（AppShell、OpportunityCard、Button/Panel 等）
 features/         → Dashboard 等复杂页面组合
 lib/              → api-client、transform（后端字段映射）、auth、filters
 services/         → 业务服务（mock/real 双模式）
 stores/           → Zustand 状态（hydrate from API on mount）
-backend/app/      → FastAPI 路由、服务、采集器、AI provider
+backend/app/      → FastAPI 路由、Repository、采集器、Arq worker、AI provider
 supabase/         → migrations、seed SQL
 ```
 

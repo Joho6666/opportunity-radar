@@ -22,7 +22,7 @@ export const useOpportunityStore = create<AppState>()(persist((set, get) => ({ .
   updateOpportunity: (id, status) => { set((state) => ({ opportunities: state.opportunities.map((item) => item.id === id ? { ...item, status } : item) })); void actOpportunity(id, status).catch(() => {}); },
   toggleSaved: (id) => { const current = get().opportunities.find((item) => item.id === id); get().updateOpportunity(id, current?.status === "saved" ? "new" : "saved"); },
   toggleSkill: (id) => set((state) => ({ skills: state.skills.map((item) => item.id === id ? { ...item, installed: !item.installed } : item) })),
-  toggleRadar: (id) => { const radar = get().radars.find((item) => item.id === id); if (!radar) return; const paused = radar.status !== "running"; set((state) => ({ radars: state.radars.map((item) => item.id === id ? { ...item, status: paused ? "running" : "paused" } : item) })); void setRadarPaused(id, paused).catch(() => {}); },
+  toggleRadar: (id) => { const radar = get().radars.find((item) => item.id === id); if (!radar) return; const shouldPause = radar.status === "active" || radar.status === "running"; set((state) => ({ radars: state.radars.map((item) => item.id === id ? { ...item, status: shouldPause ? "paused" : "active" } : item) })); void setRadarPaused(id, shouldPause).catch(() => {}); },
   runRadarNow: (id) => { set((state) => ({ radars: state.radars.map((item) => item.id === id ? { ...item, status: "running" } : item) })); void runRadar(id).then(() => get().hydrate()).catch(() => {}); },
   addRadar: (radar) => set((state) => ({ radars: [radar, ...state.radars] })),
   updateProfile: (profile) => { set({ profile }); void saveProfile(profile).catch(() => {}); },

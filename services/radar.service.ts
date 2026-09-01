@@ -14,7 +14,7 @@ export async function listRadars(): Promise<Radar[]> {
 export async function createRadar(input: { goal: string; keywords?: string[]; locations?: string[]; minimumBudget?: number }): Promise<Radar> {
   if (useMockMode) {
     const id = `radar-${Date.now()}`;
-    return { id, name: "兼职客户雷达", description: input.goal, status: "running", goal: input.goal, keywords: input.keywords ?? ["PPT", "AI 自动化", "小程序"], locations: input.locations ?? ["桂林", "线上"], minimumBudget: input.minimumBudget ?? 200, frequency: "每天", sources: ["web", "forum"], lastRunAt: "刚刚", nextRunAt: "明天 09:00", stats: { scanned: 0, found: 0, matched: 0, recommended: 0 } };
+    return { id, name: "兼职客户雷达", description: input.goal, status: "active", goal: input.goal, keywords: input.keywords ?? ["PPT", "AI 自动化", "小程序"], locations: input.locations ?? ["桂林", "线上"], minimumBudget: input.minimumBudget ?? 200, frequency: "每天", sources: ["web", "forum"], lastRunAt: "刚刚", nextRunAt: "明天 09:00", stats: { scanned: 0, found: 0, matched: 0, recommended: 0 } };
   }
   const token = await getAccessToken();
   if (!token) throw new Error("尚未登录");
