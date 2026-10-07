@@ -87,7 +87,8 @@ def test_factory_defaults_to_memory(monkeypatch):
     from app.repositories import factory
     from app.repositories.memory import MemoryRepository
 
-    monkeypatch.setattr(factory, "get_settings", lambda: Settings())
+    # explicit kwargs override the CI environment (USE_IN_MEMORY_STORE/DATABASE_URL)
+    monkeypatch.setattr(factory, "get_settings", lambda: Settings(use_in_memory_store=True, database_url=""))
     factory.get_repository_singleton.cache_clear()
     repo = factory.get_repository_singleton()
     assert isinstance(repo, MemoryRepository)
