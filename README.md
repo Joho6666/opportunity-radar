@@ -1,6 +1,11 @@
 # 机会雷达 · Opportunity Radar
 
-面向中文用户的 AI 机会发现 Web SaaS。围绕「发现机会 → 判断机会 → 管理机会 → 采取行动」设计，包含 Next.js 前端与可独立运行的 FastAPI Opportunity Engine。
+面向中文用户的 AI 机会发现 Web SaaS，正在升级为 **Personal Money Intelligence OS / 财富情报系统**。围绕「发现机会 → 判断机会 → 管理机会 → 采取行动」设计，包含 Next.js 前端与可独立运行的 FastAPI Opportunity Engine。
+
+- 产品演进路线：[MONEY_INTELLIGENCE_ROADMAP.md](./MONEY_INTELLIGENCE_ROADMAP.md)（Phase 0-8）
+- 现状审计：[CURRENT_ARCHITECTURE.md](./CURRENT_ARCHITECTURE.md)
+- 开源对标研究：[docs/research/open-source-benchmark.md](./docs/research/open-source-benchmark.md)
+- Phase 1（数据基础 + 情报引擎）说明：[backend/README_INTELLIGENCE.md](./backend/README_INTELLIGENCE.md)
 
 ## 功能
 
@@ -16,6 +21,7 @@
 - **LLM 真实路径**：配置 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL` 后自动接入 OpenAI-compatible 模型，失败时回退确定性分析
 - Supabase PostgreSQL schema、RLS migration、本地 Auth 登录页与可替换服务层
 - 演示模式（`NEXT_PUBLIC_USE_MOCK=true`）开箱即用；联机模式（`false`）启用 middleware 路由保护
+- **Money Intelligence（Phase 1）**：四级去重（URL/内容/SimHash/Embedding）、Signal 抽取、EventCluster 聚类、Trend Snapshot 与 Breakout 检测、MoneyScore（11 维）、Information Edge（9 维）、Source Health 看板数据、Daily Brief V2、`/api/intelligence/*` 只读路由
 
 ## 技术栈
 
@@ -111,15 +117,15 @@ LLM_MODEL=
 ## Docker
 
 ```bash
-Copy-Item backend/.env.example backend/.env
+cp backend/.env.example backend/.env
 docker compose up --build
 ```
 
-Compose 会启动 API、Redis、Arq worker 与 scheduler。Worker 消费雷达任务；scheduler 每 60 秒把到期且未暂停的雷达入队。
+Compose 会启动 **PostgreSQL（pgvector/pgvector:pg16，自动跑迁移）**、API、Redis、Arq worker 与 scheduler。Worker 消费雷达任务；scheduler 每 60 秒把到期且未暂停的雷达入队，并每小时为 trend topic 记录快照 + 检测 breakout。
 
 ## CI
 
-推送到 `main`/`master` 或发起 PR 时自动运行：前端 lint + test + build，后端 pytest。
+推送到 `main`/`master` 或发起 PR 时自动运行：前端 lint + test + build；后端在 **pgvector Postgres + Redis service** 下跑迁移与 pytest（PG 契约测试不再跳过）。
 
 ## 架构
 

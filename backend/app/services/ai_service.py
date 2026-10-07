@@ -23,11 +23,17 @@ def reset_llm_context(token: Token) -> None:
     _llm_context.reset(token)
 
 
-def _record_llm_call(schema_name: str, provider: str | None, model: str, latency_ms: int, fallbacked: bool) -> None:
+def _record_llm_call(schema_name: str, provider: str | None, model: str, latency_ms: int, fallbacked: bool, stage: str | None = None, usage: dict | None = None) -> None:
     context = _llm_context.get() or {}
     repository = context.get("repository")
     if repository is None:
         return
+    settings = get_settings()
+    prompt_tokens = usage.get("prompt_tokens") if usage else None
+    completion_tokens = usage.get("completion_tokens") if usage else None
+    cost_usd = None
+    if prompt_tokens is not None and completion_tokens is not None and (settings.llm_price_input_per_mtok or settings.llm_price_output_per_mtok):
+        cost_usd = (prompt_tokens * settings.llm_price_input_per_mtok + completion_tokens * settings.llm_price_output_per_mtok) / 1_000_000
     repository.record_llm_call(
         user_id=context.get("user_id"),
         radar_id=context.get("radar_id"),
@@ -37,6 +43,10 @@ def _record_llm_call(schema_name: str, provider: str | None, model: str, latency
         latency_ms=latency_ms,
         fallbacked=fallbacked,
         schema_name=schema_name,
+        stage=stage,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_usd=cost_usd,
     )
 
 
@@ -47,10 +57,11 @@ async def _llm_structured(prompt: str, schema_name: str) -> dict[str, Any] | Non
     started = time.perf_counter()
     fallbacked = True
     payload: dict[str, Any] | None = None
+    usage: dict | None = None
     try:
         if provider is None:
             return None
-        result = await provider.structured_output(f"{prompt}\n\n只输出一个 JSON 对象，不要包含 markdown 代码块或其他文本。字段说明：{schema_name}", schema_name)
+        result, usage = await provider.structured_output_with_usage(f"{prompt}\n\n只输出一个 JSON 对象，不要包含 markdown 代码块或其他文本。字段说明：{schema_name}", schema_name)
         if isinstance(result, dict):
             payload = result
             fallbacked = False
@@ -58,9 +69,10 @@ async def _llm_structured(prompt: str, schema_name: str) -> dict[str, Any] | Non
         return None
     except Exception:
         logger.exception("llm structured output failed", extra={"schema_name": schema_name})
+        usage = None
         return None
     finally:
-        _record_llm_call(schema_name, "openai-compatible" if provider else None, settings.llm_model, int((time.perf_counter() - started) * 1000), fallbacked)
+        _record_llm_call(schema_name, "openai-compatible" if provider else None, settings.llm_model, int((time.perf_counter() - started) * 1000), fallbacked, stage=schema_name, usage=usage)
 
 
 async def analyze_profile(request: ProfileAnalyzeRequest) -> ProfileAnalysis:
@@ -114,7 +126,7 @@ async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = 
     return output[:10]
 
 
-async def analyze_raw_item(item: RawItem, profile_skills: list[str]) -> OpportunityAnalysis:
+async def analyze_raw_item(item: RawItem, profile_skills: list[str], has_commercial_signal: bool = True) -> OpportunityAnalysis:
     prompt = f"判断以下内容是否是值得接单的真实机会，并给出结构化分析。用户技能：{profile_skills}。标题：{item.title}；内容：{item.content}；链接：{item.url}"
     payload = await _llm_structured(prompt, "is_opportunity: boolean, type: ('job'|'client'|'project'|'business'|'github'), title: string, summary: string, location: string, work_mode: ('online'|'offline'|'hybrid'), skills: string[], budget_min: number, budget_max: number, estimated_hours: number, commercial_intent/skill_match/conversion_probability/urgency/competition/risk: number(0-100), reasons: string[], warnings: string[]")
     adjustment, rule_warnings = risk_adjustment(item)
@@ -126,6 +138,10 @@ async def analyze_raw_item(item: RawItem, profile_skills: list[str]) -> Opportun
             return analysis
         except Exception:
             pass
+    if not has_commercial_signal:
+        # Deterministic fallback must not fabricate opportunities: without any
+        # commercial/payment signal, the item is recorded but not scored as one.
+        return OpportunityAnalysis(is_opportunity=False, type="project", title=item.title, summary=item.content[:220], location="线上", work_mode="online", skills=[], budget_min=0, budget_max=0, estimated_hours=1, commercial_intent=0, skill_match=0, conversion_probability=0, urgency=0, competition=0, risk=min(100, adjustment), reasons=[], warnings=rule_warnings)
     text = f"{item.title} {item.content}"
     lower = text.lower()
     if "PPT" in text:
@@ -138,3 +154,100 @@ async def analyze_raw_item(item: RawItem, profile_skills: list[str]) -> Opportun
         values = ("project", 1500, 3000, 30, 76, 55, 60, 55, 43, ["网站开发", "小程序"])
     kind, min_budget, max_budget, hours, match, conversion, urgency, competition, risk, skills = values
     return OpportunityAnalysis(is_opportunity=True, type=kind, title=item.title, summary=item.content[:220], location="桂林" if "桂林" in text else "远程", work_mode="online", skills=skills, budget_min=min_budget, budget_max=max_budget, estimated_hours=hours, commercial_intent=95, skill_match=match, conversion_probability=conversion, urgency=urgency, competition=competition, risk=min(100, risk + adjustment), reasons=["技能高度匹配", "发布时间较短", "预算合理", "交付难度可控"], warnings=rule_warnings or ["请确认需求范围与修改次数"])
+
+
+# ---- Phase 2: cheap-model calls (fast model preferred, None ⇒ rule fallbacks) ----
+
+
+def _fast_model(settings) -> str:
+    return settings.llm_fast_model or settings.llm_model
+
+
+async def _llm_structured_fast(prompt: str, schema_name: str) -> dict[str, Any] | None:
+    """Cheap-model variant used for signal extraction / listener compilation."""
+    settings = get_settings()
+    provider = get_provider()
+    if provider is None:
+        return None
+    started = time.perf_counter()
+    payload: dict[str, Any] | None = None
+    usage: dict | None = None
+    try:
+        result, usage = await provider.structured_output_with_usage(f"{prompt}\n\n只输出一个 JSON 对象，不要包含 markdown 代码块或其他文本。字段说明：{schema_name}", schema_name, model=_fast_model(settings))
+        if isinstance(result, dict):
+            payload = result
+    except Exception:
+        logger.exception("llm fast call failed", extra={"schema_name": schema_name})
+        usage = None
+    finally:
+        _record_llm_call(schema_name, "openai-compatible", _fast_model(settings), int((time.perf_counter() - started) * 1000), payload is None, stage=schema_name, usage=usage)
+    return payload
+
+
+async def extract_signals_llm(text: str) -> list | None:
+    """Multi-signal extraction for cluster representatives. None = unavailable."""
+    if not text.strip():
+        return None
+    prompt = (
+        "从以下公开信息中抽取所有有价值的商业信号（0-4 条）。signal_type 只能取：pain_point, purchase_intent, hiring, outsourcing, "
+        "product_request, feature_request, complaint, price_change, funding, policy, tender, technology_growth, creator_trend, consumer_trend, supply_shortage。"
+        "payment_evidence=true 仅当文中出现明确付费/预算/报价证据。\n内容：\n" + text[:2500]
+    )
+    payload = await _llm_structured_fast(prompt, "signals: {{signal_type: string, title: string, keywords: string[], commercial_intent: number(0-100), payment_evidence: boolean, urgency: number(0-100), confidence: number(0-100)}}[]，键名为 signals")
+    if payload is None or not isinstance(payload.get("signals"), list):
+        return None
+    from ..schemas.intelligence import SignalRead, SignalType
+
+    allowed = set(SignalType.__args__) if hasattr(SignalType, "__args__") else set()
+    signals: list[SignalRead] = []
+    for item in payload["signals"][:4]:
+        if not isinstance(item, dict) or item.get("signal_type") not in allowed:
+            continue
+        try:
+            signals.append(SignalRead(
+                signal_type=item["signal_type"],
+                title=str(item.get("title") or "")[:200],
+                keywords=[str(keyword) for keyword in (item.get("keywords") or [])[:8]],
+                intent="commercial" if (item.get("commercial_intent") or 0) >= 40 else "informational",
+                commercial_intent=max(0, min(100, int(item.get("commercial_intent") or 0))),
+                payment_evidence=bool(item.get("payment_evidence")),
+                urgency=max(0, min(100, int(item.get("urgency") or 0))),
+                confidence=max(0, min(100, int(item.get("confidence") or 0))),
+                extraction_method="llm",
+            ))
+        except Exception:
+            continue
+    return signals or None
+
+
+async def compile_listener_llm(description: str) -> "Any | None":
+    """Compile a natural-language listener into gate config; None = unavailable."""
+    if not description.strip():
+        return None
+    from ..schemas.intelligence import RadarListenerConfig
+    from pydantic import TypeAdapter
+
+    prompt = (
+        "把下面的自然语言监听需求编译为结构化配置。positive_signals：应该出现的关键词/短语；negative_signals：出现即排除的关键词；"
+        "search_queries：用于公开网络搜索的查询建议（≤5 条）；exclusion_rules：字面排除规则。\n监听需求：\n" + description[:2000]
+    )
+    payload = await _llm_structured_fast(prompt, "positive_signals: string[], negative_signals: string[], search_queries: string[], exclusion_rules: string[]")
+    if payload is None:
+        return None
+    try:
+        return TypeAdapter(RadarListenerConfig).validate_python(payload)
+    except Exception:
+        return None
+
+
+async def describe_pain_solutions(theme: str, summary: str) -> tuple[str, int] | None:
+    """Current solutions + satisfaction (0-100) for a pain theme; None = unavailable."""
+    prompt = f"针对用户集中抱怨的问题「{theme}」，列出当前市场已有解决方案（≤150 字），并给出 0-100 的整体满意度估计（越高越成熟）。\n背景：{summary[:500]}"
+    payload = await _llm_structured_fast(prompt, "current_solutions: string, solution_satisfaction: number(0-100)")
+    if payload is None or "current_solutions" not in payload:
+        return None
+    try:
+        satisfaction = max(0, min(100, int(payload.get("solution_satisfaction") or 50)))
+        return str(payload["current_solutions"]), satisfaction
+    except Exception:
+        return None

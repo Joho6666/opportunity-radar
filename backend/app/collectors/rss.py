@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from .base import SourceAdapter
+from .base import CollectorCapabilities, SourceAdapter
 from .http import fetcher, validate_public_url
 from ..core.config import get_settings
 from ..core.errors import AppError
@@ -14,6 +14,9 @@ except ImportError:  # pragma: no cover
 
 class RssCollector(SourceAdapter):
     slug = "rss"
+
+    def capabilities(self) -> CollectorCapabilities:
+        return CollectorCapabilities(search=True, timeline=True, historical=True)
 
     async def search(self, query: str) -> list[RawItem]:
         feeds = _feeds_for(query)
@@ -40,6 +43,9 @@ class RssCollector(SourceAdapter):
                         author=_author(entry),
                         source=self.slug,
                         published_at=_published(entry),
+                        updated_at_source=_updated(entry),
+                        platform="rss",
+                        engagement={},
                         metadata={"feed": feed_url, "query": query},
                     )
                 )
@@ -65,6 +71,19 @@ def _author(entry) -> str | None:
 def _published(entry) -> datetime | None:
     value = entry.get("published") or entry.get("updated")
     if not value:
+        return None
+    try:
+        return parsedate_to_datetime(value).astimezone(UTC)
+    except (TypeError, ValueError, OverflowError):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+        except ValueError:
+            return None
+
+
+def _updated(entry) -> datetime | None:
+    value = entry.get("updated")
+    if not value or value == entry.get("published"):
         return None
     try:
         return parsedate_to_datetime(value).astimezone(UTC)

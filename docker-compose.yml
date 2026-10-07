@@ -1,11 +1,44 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: opportunity_radar
+    ports: ["54329:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d opportunity_radar"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    image: pgvector/pgvector:pg16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./supabase/migrations:/migrations:ro"]
+    entrypoint: >
+      sh -c 'for f in /migrations/*.sql; do
+        echo "applying $$f";
+        PGPASSWORD=postgres psql -h postgres -U postgres -d opportunity_radar -v ON_ERROR_STOP=1 -f "$$f" || exit 1;
+      done;
+      echo "migrations applied"'
+    restart: "no"
   backend:
     build: ./backend
     ports: ["8011:8011"]
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379
-    depends_on: [redis]
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opportunity_radar
+      USE_IN_MEMORY_STORE: "false"
+      INCLUDE_MOCK_COLLECTOR: "false"
+    depends_on:
+      redis: {}
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=3)"]
       interval: 30s
@@ -16,15 +49,29 @@ services:
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opportunity_radar
+      USE_IN_MEMORY_STORE: "false"
+      INCLUDE_MOCK_COLLECTOR: "false"
     command: arq app.workers.settings.WorkerSettings
-    depends_on: [redis]
+    depends_on:
+      redis: {}
+      migrate:
+        condition: service_completed_successfully
   scheduler:
     build: ./backend
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opportunity_radar
+      USE_IN_MEMORY_STORE: "false"
+      INCLUDE_MOCK_COLLECTOR: "false"
     command: python -m app.workers.scheduler
-    depends_on: [redis]
+    depends_on:
+      redis: {}
+      migrate:
+        condition: service_completed_successfully
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+volumes:
+  pgdata:

@@ -56,6 +56,8 @@ class RadarCreate(BaseModel):
     keywords: list[str] = []
     locations: list[str] = []
     sources: list[SourceSlug] = ["mock"]
+    # Natural-language listener: e.g. "寻找正在抱怨短视频制作太慢、希望批量生产视频的商家"
+    listener_description: str = Field(default="", max_length=2000)
 
 
 class RadarRunStats(BaseModel):
@@ -76,6 +78,7 @@ class RadarRead(RadarCreate):
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None
     stats: RadarRunStats = Field(default_factory=RadarRunStats)
+    listener_config: dict | None = None
 
 
 class RadarRunRead(BaseModel):
@@ -86,6 +89,7 @@ class RadarRunRead(BaseModel):
     error_message: str | None = None
     error_code: str | None = None
     collector_errors: list[dict] = Field(default_factory=list)
+    stage_stats: dict = Field(default_factory=dict)
 
 
 class RawItem(BaseModel):
@@ -97,6 +101,12 @@ class RawItem(BaseModel):
     source: str
     published_at: datetime | None = None
     metadata: dict = {}
+    # Money Intelligence extensions: platform-side last activity time (e.g. GitHub
+    # pushed_at). Freshness filtering uses max(published_at, updated_at_source).
+    updated_at_source: datetime | None = None
+    platform: str | None = None
+    language: str | None = None
+    engagement: dict = {}
 
 
 class OpportunityAnalysis(BaseModel):
@@ -145,6 +155,12 @@ class OpportunityRead(BaseModel):
     skills: list[str] = []
     reasons: list[str] = []
     warnings: list[str] = []
+    # Money Intelligence extensions (all optional so legacy payloads validate)
+    money_score: int | None = None
+    money_breakdown: dict | None = None
+    information_edge: int | None = None
+    information_edge_breakdown: dict | None = None
+    verification_status: str = "unverified"
 
 
 class OpportunityAction(BaseModel):
@@ -164,6 +180,16 @@ class DailyBriefRead(BaseModel):
     signals: list[str]
     avoid: list[str]
     actions: list[str]
+    # Money Intelligence V2 (additive; legacy fields keep the old contract)
+    top_opportunities: list[dict] = []
+    rising_trends: list[dict] = []
+    pain_points: list[dict] = []
+    payment_signals: list[dict] = []
+    job_market_signals: list[dict] = []
+    tender_signals: list[dict] = []
+    content_opportunities: list[dict] = []
+    today_actions: list[dict] = []
+    brief_version: str = "v2"
 
 
 class PreferenceState(BaseModel):
