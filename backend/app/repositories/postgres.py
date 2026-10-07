@@ -667,7 +667,7 @@ class PostgresRepository:
             rows = conn.execute(
                 text(
                     "SELECT s.* FROM signals s JOIN radars r ON r.id=s.radar_id WHERE r.user_id=CAST(:uid AS uuid) "
-                    "AND (:rid::uuid IS NULL OR s.radar_id=CAST(:rid AS uuid)) ORDER BY s.created_at DESC LIMIT :limit"
+                    "AND (CAST(:rid AS uuid) IS NULL OR s.radar_id=CAST(:rid AS uuid)) ORDER BY s.created_at DESC LIMIT :limit"
                 ),
                 {"uid": as_uuid(user_id), "rid": as_uuid(radar_id) if radar_id else None, "limit": limit},
             ).mappings().all()
@@ -735,7 +735,7 @@ class PostgresRepository:
             rows = conn.execute(
                 text(
                     "SELECT c.* FROM event_clusters c JOIN radars r ON r.id=c.radar_id WHERE r.user_id=CAST(:uid AS uuid) "
-                    "AND (:rid::uuid IS NULL OR c.radar_id=CAST(:rid AS uuid)) AND c.merged_into IS NULL ORDER BY c.last_seen_at DESC LIMIT :limit"
+                    "AND (CAST(:rid AS uuid) IS NULL OR c.radar_id=CAST(:rid AS uuid)) AND c.merged_into IS NULL ORDER BY c.last_seen_at DESC LIMIT :limit"
                 ),
                 {"uid": as_uuid(user_id), "rid": as_uuid(radar_id) if radar_id else None, "limit": limit},
             ).mappings().all()
@@ -1098,7 +1098,7 @@ class PostgresRepository:
             rows = conn.execute(
                 text(
                     "SELECT p.* FROM pain_points p JOIN radars r ON r.id=p.radar_id WHERE r.user_id=CAST(:uid AS uuid) "
-                    "AND (:rid::uuid IS NULL OR p.radar_id=CAST(:rid AS uuid)) ORDER BY p.severity DESC LIMIT :limit"
+                    "AND (CAST(:rid AS uuid) IS NULL OR p.radar_id=CAST(:rid AS uuid)) ORDER BY p.severity DESC LIMIT :limit"
                 ),
                 {"uid": as_uuid(user_id), "rid": as_uuid(radar_id) if radar_id else None, "limit": limit},
             ).mappings().all()
