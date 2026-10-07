@@ -82,13 +82,16 @@ def test_postgres_repository_contract():
     _contract(repo, user_id)
 
 
-def test_factory_defaults_to_memory():
-    from app.repositories.factory import get_repository_singleton
+def test_factory_defaults_to_memory(monkeypatch):
+    from app.core.config import Settings
+    from app.repositories import factory
     from app.repositories.memory import MemoryRepository
 
-    get_repository_singleton.cache_clear()
-    repo = get_repository_singleton()
+    monkeypatch.setattr(factory, "get_settings", lambda: Settings())
+    factory.get_repository_singleton.cache_clear()
+    repo = factory.get_repository_singleton()
     assert isinstance(repo, MemoryRepository)
+    factory.get_repository_singleton.cache_clear()
 
 
 def test_postgres_sql_uses_bound_parameters():
