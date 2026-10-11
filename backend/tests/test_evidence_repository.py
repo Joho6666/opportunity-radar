@@ -1,5 +1,5 @@
 from app.repositories.memory import MemoryRepository
-from app.services.evidence_ingest import EvidenceBatch
+from app.services.evidence_ingest import EvidenceBatch, EvidenceInput, evidence_identity
 
 
 def _batch(batch_id: str) -> EvidenceBatch:
@@ -38,3 +38,21 @@ def test_memory_evidence_upsert_is_idempotent_across_repeated_batches():
     assert len(repository.list_evidence("user-1")) == 2
     assert len(repository.list_evidence("user-1", category="buyer")) == 1
     assert repository.list_evidence("user-2") == []
+
+
+def test_identity_namespaces_external_ids():
+    a = EvidenceInput(source="github", external_id="123", url="https://example.test/a", raw_text="真实原文足够长，用于身份键测试。")
+    b = a.model_copy(update={"source": "hackernews"})
+    assert evidence_identity(a) != evidence_identity(b)
+
+
+def test_duplicate_response_uses_stored_id_and_counts_batch_duplicates():
+    repo = MemoryRepository()
+    batch = _batch("one")
+    repeated = batch.model_copy(update={"items": [batch.items[0], batch.items[0]]})
+    first = repo.upsert_evidence_batch("owner", repeated)
+    second = repo.upsert_evidence_batch("owner", repeated.model_copy(update={"batch_id": "two"}))
+    assert (first.inserted, first.duplicates) == (1, 1)
+    assert (second.inserted, second.duplicates) == (0, 2)
+    assert first.records[0].evidence_id == second.records[0].evidence_id
+    assert first.records[0].evidence_id == repo.list_evidence("owner")[0].evidence_id

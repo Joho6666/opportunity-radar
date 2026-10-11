@@ -66,10 +66,8 @@ def _canonical_url(url: str) -> str:
 
 
 def evidence_identity(item: EvidenceInput) -> str:
-    canonical_url = _canonical_url(str(item.url))
-    return item.external_id or hashlib.sha256(
-        f"{item.source}|{canonical_url}|{item.raw_text.strip()}".encode("utf-8")
-    ).hexdigest()
+    identity = item.external_id if item.external_id else f"{_canonical_url(str(item.url))}|{item.raw_text.strip()}"
+    return hashlib.sha256(f"{item.source}|{identity}".encode("utf-8")).hexdigest()
 
 
 def normalize_evidence(batch: EvidenceBatch, now: datetime | None = None) -> list[EvidenceRecord]:

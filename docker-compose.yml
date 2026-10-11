@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: opportunity_radar
-    ports: ["54329:5432"]
+    ports: ["127.0.0.1:54329:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init:/docker-entrypoint-initdb.d:ro
@@ -36,7 +36,8 @@ services:
       USE_IN_MEMORY_STORE: "false"
       INCLUDE_MOCK_COLLECTOR: "false"
     depends_on:
-      redis: {}
+      redis:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
     healthcheck:
@@ -54,7 +55,8 @@ services:
       INCLUDE_MOCK_COLLECTOR: "false"
     command: arq app.workers.settings.WorkerSettings
     depends_on:
-      redis: {}
+      redis:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
   scheduler:
@@ -67,7 +69,8 @@ services:
       INCLUDE_MOCK_COLLECTOR: "false"
     command: python -m app.workers.scheduler
     depends_on:
-      redis: {}
+      redis:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
   redis:

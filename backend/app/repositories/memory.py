@@ -237,17 +237,19 @@ class MemoryRepository:
     def upsert_evidence_batch(self, user_id: str, batch: EvidenceBatch) -> EvidenceUpsertResult:
         normalized = normalize_evidence(batch)
         inserted = 0
-        duplicates = 0
-        batch_key = (user_id, batch.batch_id)
+        stored = []
         for record in normalized:
             key = (user_id, record.identity_key)
-            if key in self.evidence:
-                duplicates += 1
-                continue
-            self.evidence[key] = record
-            inserted += 1
-        self.evidence_batches[batch_key].add(batch.batch_id)
-        return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=duplicates, records=normalized)
+            if key not in self.evidence:
+                self.evidence[key] = record
+                inserted += 1
+            stored.append(self.evidence[key])
+        return EvidenceUpsertResult(
+            batch_id=batch.batch_id,
+            inserted=inserted,
+            duplicates=len(batch.items) - inserted,
+            records=stored,
+        )
 
     def list_evidence(self, user_id: str, category: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
         records = [record for (owner, _), record in self.evidence.items() if owner == user_id and (category is None or record.category == category)]

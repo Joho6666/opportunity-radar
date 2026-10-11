@@ -12,7 +12,7 @@ def get_repository_singleton():
         return memory_singleton
     engine = create_database_engine()
     if engine is None:
-        return memory_singleton
+        raise RuntimeError("DATABASE_URL is required when USE_IN_MEMORY_STORE=false")
     return PostgresRepository(engine)
 
 
