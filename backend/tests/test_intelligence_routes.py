@@ -15,6 +15,7 @@ def test_intelligence_routes_registered():
     assert "/api/intelligence/trends" in paths
     assert "/api/intelligence/changes" in paths
     assert "/api/intelligence/source-health" in paths
+    assert "/api/intelligence/evidence/preview" in paths
 
 
 def test_legacy_routes_untouched():
