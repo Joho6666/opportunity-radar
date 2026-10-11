@@ -18,6 +18,9 @@ class TikHubCollector(SourceAdapter):
 
     async def search(self, query: str) -> list[RawItem]:
         settings = get_settings()
+        query = query.strip()
+        if not query:
+            raise RuntimeError("TIKHUB_QUERY_REQUIRED")
         if not settings.tikhub_api_key:
             raise RuntimeError("TIKHUB_API_KEY is not configured")
         payload = await fetcher.get_json(
@@ -53,7 +56,13 @@ class TikHubCollector(SourceAdapter):
                     "shares": (item.get("stats") or {}).get("shareCount"),
                     "plays": (item.get("stats") or {}).get("playCount"),
                 },
-                metadata={"query": query, "nickname": author.get("nickname", ""), "api": "tikhub"},
+                metadata={
+                    "query": query,
+                    "nickname": author.get("nickname", ""),
+                    "acquisition_tool": "tikhub",
+                    "original_platform": "tiktok",
+                    "provider_endpoint": self.endpoint,
+                },
             ))
         return items
 

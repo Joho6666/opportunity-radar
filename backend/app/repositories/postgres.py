@@ -643,14 +643,15 @@ class PostgresRepository:
     def upsert_evidence_batch(self, user_id: str, batch: EvidenceBatch) -> EvidenceUpsertResult:
         records = normalize_evidence(batch)
         inserted = 0
+        stored: list[EvidenceRecord] = []
         with self._conn() as conn:
             uid = self._ensure_user(conn, user_id)
             for record in records:
                 result = conn.execute(
                     text(
                         "INSERT INTO evidence_items "
-                        "(user_id, identity_key, batch_id, source, url, external_id, raw_text, query, published_at, captured_at, category, buyer_type, problem, payment_signal, urgency_signal, metadata, evidence_grade, verification_status) "
-                        "VALUES (CAST(:user_id AS uuid), :identity_key, :batch_id, :source, :url, :external_id, :raw_text, :query, :published_at, :captured_at, :category, :buyer_type, :problem, :payment_signal, :urgency_signal, CAST(:metadata AS jsonb), :evidence_grade, :verification_status) "
+                        "(user_id, identity_key, batch_id, source, source_platform, acquisition_tool, url, external_id, raw_text, query, published_at, captured_at, category, buyer_type, problem, payment_signal, urgency_signal, metadata, evidence_grade, verification_status, classification_source, classification_reason, classification_confidence) "
+                        "VALUES (CAST(:user_id AS uuid), :identity_key, :batch_id, :source, :source_platform, :acquisition_tool, :url, :external_id, :raw_text, :query, :published_at, :captured_at, :category, :buyer_type, :problem, :payment_signal, :urgency_signal, CAST(:metadata AS jsonb), :evidence_grade, :verification_status, :classification_source, :classification_reason, :classification_confidence) "
                         "ON CONFLICT (user_id, identity_key) DO NOTHING RETURNING id"
                     ),
                     {
@@ -658,6 +659,8 @@ class PostgresRepository:
                         "identity_key": record.identity_key,
                         "batch_id": record.batch_id,
                         "source": record.source,
+                        "source_platform": record.source_platform,
+                        "acquisition_tool": record.acquisition_tool,
                         "url": str(record.url),
                         "external_id": record.external_id,
                         "raw_text": record.raw_text,
@@ -672,11 +675,19 @@ class PostgresRepository:
                         "metadata": json.dumps(record.metadata),
                         "evidence_grade": record.evidence_grade,
                         "verification_status": record.verification_status,
+                        "classification_source": record.classification_source,
+                        "classification_reason": record.classification_reason,
+                        "classification_confidence": record.classification_confidence,
                     },
                 )
                 if result.first() is not None:
                     inserted += 1
-        return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=len(records) - inserted, records=records)
+                row = conn.execute(
+                    text("SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) AND identity_key=:identity_key"),
+                    {"user_id": uid, "identity_key": record.identity_key},
+                ).mappings().one()
+                stored.append(self._evidence_from_row(row))
+        return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=len(batch.items) - inserted, records=stored)
 
     def list_evidence(self, user_id: str, category: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
         query = (

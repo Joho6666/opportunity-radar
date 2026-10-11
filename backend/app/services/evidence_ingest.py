@@ -25,6 +25,11 @@ class EvidenceInput(BaseModel):
     payment_signal: str | None = Field(default=None, max_length=500)
     urgency_signal: str | None = Field(default=None, max_length=500)
     metadata: dict[str, str] = Field(default_factory=dict)
+    classification_source: str = Field(default="unclassified", max_length=40)
+    classification_reason: str = Field(default="", max_length=300)
+    classification_confidence: float = Field(default=0.0, ge=0, le=1)
+    source_platform: str = Field(default="", max_length=80)
+    acquisition_tool: str = Field(default="", max_length=80)
 
 
 class EvidenceBatch(BaseModel):
@@ -51,6 +56,11 @@ class EvidenceRecord(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
     evidence_grade: str = "C"
     verification_status: str = "unverified"
+    classification_source: str = "unclassified"
+    classification_reason: str = ""
+    classification_confidence: float = Field(default=0.0, ge=0, le=1)
+    source_platform: str = ""
+    acquisition_tool: str = ""
 
 
 class EvidenceUpsertResult(BaseModel):

@@ -31,6 +31,8 @@ def test_normalize_evidence_deduplicates_same_external_item():
     assert records[0].evidence_id
     assert records[0].captured_at.isoformat() == "2026-10-11T00:00:00+00:00"
     assert records[0].verification_status == "unverified"
+    assert records[0].classification_source == "unclassified"
+    assert records[0].classification_confidence == 0
 
 
 def test_evidence_requires_verbatim_text_and_http_url():
