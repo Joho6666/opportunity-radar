@@ -679,10 +679,14 @@ class PostgresRepository:
         return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=len(records) - inserted, records=records)
 
     def list_evidence(self, user_id: str, category: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
-        where = "AND category=:category" if category else ""
+        query = (
+            "SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) "
+            + ("AND category=:category " if category else "")
+            + "ORDER BY captured_at DESC LIMIT :limit"
+        )
         with self._conn() as conn:
             rows = conn.execute(
-                text(f"SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) {where} ORDER BY captured_at DESC LIMIT :limit"),
+                text(query),
                 {"user_id": as_uuid(user_id), "category": category, "limit": limit},
             ).mappings().all()
         return [self._evidence_from_row(row) for row in rows]
