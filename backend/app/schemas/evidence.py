@@ -1,5 +1,5 @@
 """Public evidence ingestion contracts."""
 
-from ..services.evidence_ingest import EvidenceBatch, EvidenceInput, EvidenceRecord
+from ..services.evidence_ingest import EvidenceBatch, EvidenceCategory, EvidenceInput, EvidenceRecord, EvidenceUpsertResult
 
-__all__ = ["EvidenceBatch", "EvidenceInput", "EvidenceRecord"]
+__all__ = ["EvidenceBatch", "EvidenceCategory", "EvidenceInput", "EvidenceRecord", "EvidenceUpsertResult"]

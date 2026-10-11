@@ -7,6 +7,7 @@ from ..schemas.intelligence import ChangeEventRead, EventClusterRead, PainPointR
 from ..services.dedup_service import hash_url
 from ..services.daily_intelligence import assemble
 from ..services.income import potential_income_range
+from ..services.evidence_ingest import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult, normalize_evidence
 
 
 class MemoryRepository:
@@ -38,7 +39,8 @@ class MemoryRepository:
         self.source_health: dict[str, SourceHealthRead] = {}
         self.briefs: dict[tuple[str, str], DailyBriefRead] = {}
         self.pain_points: dict[tuple[str, str], PainPointRead] = {}
-
+        self.evidence: dict[tuple[str, str], EvidenceRecord] = {}
+        self.evidence_batches: dict[tuple[str, str], set[str]] = defaultdict(set)
     def get_profile(self, user_id: str) -> ProfileRead:
         if user_id not in self.profiles:
             self.profiles[user_id] = ProfileRead(id=str(uuid4()), user_id=user_id, display_name="新用户", identity="", location="", monthly_income_goal=0, minimum_project_budget=0, available_hours_per_day=0, skills=[], goals=[])
@@ -231,6 +233,26 @@ class MemoryRepository:
 
     def record_event(self, user_id: str, opportunity_id: str | None, event: str, metadata: dict | None = None) -> None:
         self.events.append({"user_id": user_id, "opportunity_id": opportunity_id, "event": event, "metadata": metadata or {}})
+
+    def upsert_evidence_batch(self, user_id: str, batch: EvidenceBatch) -> EvidenceUpsertResult:
+        normalized = normalize_evidence(batch)
+        inserted = 0
+        duplicates = 0
+        batch_key = (user_id, batch.batch_id)
+        for record in normalized:
+            key = (user_id, record.identity_key)
+            if key in self.evidence:
+                duplicates += 1
+                continue
+            self.evidence[key] = record
+            inserted += 1
+        self.evidence_batches[batch_key].add(batch.batch_id)
+        return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=duplicates, records=normalized)
+
+    def list_evidence(self, user_id: str, category: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
+        records = [record for (owner, _), record in self.evidence.items() if owner == user_id and (category is None or record.category == category)]
+        records.sort(key=lambda record: record.captured_at, reverse=True)
+        return records[:limit]
 
     # ---- Money Intelligence extensions ----
 

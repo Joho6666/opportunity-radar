@@ -9,6 +9,8 @@ from ..core.config import get_settings
 from ..core.errors import AppError
 from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, QueryPlanItem, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem, SkillInput
 from ..schemas.intelligence import ChangeEventRead, EventClusterRead, SignalRead, SourceHealthRead, TrendSnapshotRead, TrendTopicRead
+from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult
+from ..services.evidence_ingest import normalize_evidence
 
 
 def vector_literal(vector: list[float]) -> str:
@@ -630,6 +632,60 @@ class PostgresRepository:
         with self._conn() as conn:
             self._ensure_user(conn, user_id)
             store_event(conn, as_uuid(user_id), as_uuid(opportunity_id) if opportunity_id else None, event, metadata or {})
+
+    def _evidence_from_row(self, row) -> EvidenceRecord:
+        payload = dict(row)
+        payload["evidence_id"] = str(payload.pop("id"))
+        payload.pop("user_id", None)
+        payload.pop("created_at", None)
+        return EvidenceRecord.model_validate(payload)
+
+    def upsert_evidence_batch(self, user_id: str, batch: EvidenceBatch) -> EvidenceUpsertResult:
+        records = normalize_evidence(batch)
+        inserted = 0
+        with self._conn() as conn:
+            uid = self._ensure_user(conn, user_id)
+            for record in records:
+                result = conn.execute(
+                    text(
+                        "INSERT INTO evidence_items "
+                        "(user_id, identity_key, batch_id, source, url, external_id, raw_text, query, published_at, captured_at, category, buyer_type, problem, payment_signal, urgency_signal, metadata, evidence_grade, verification_status) "
+                        "VALUES (CAST(:user_id AS uuid), :identity_key, :batch_id, :source, :url, :external_id, :raw_text, :query, :published_at, :captured_at, :category, :buyer_type, :problem, :payment_signal, :urgency_signal, CAST(:metadata AS jsonb), :evidence_grade, :verification_status) "
+                        "ON CONFLICT (user_id, identity_key) DO NOTHING RETURNING id"
+                    ),
+                    {
+                        "user_id": uid,
+                        "identity_key": record.identity_key,
+                        "batch_id": record.batch_id,
+                        "source": record.source,
+                        "url": str(record.url),
+                        "external_id": record.external_id,
+                        "raw_text": record.raw_text,
+                        "query": record.query,
+                        "published_at": record.published_at,
+                        "captured_at": record.captured_at,
+                        "category": record.category,
+                        "buyer_type": record.buyer_type,
+                        "problem": record.problem,
+                        "payment_signal": record.payment_signal,
+                        "urgency_signal": record.urgency_signal,
+                        "metadata": json.dumps(record.metadata),
+                        "evidence_grade": record.evidence_grade,
+                        "verification_status": record.verification_status,
+                    },
+                )
+                if result.first() is not None:
+                    inserted += 1
+        return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=len(records) - inserted, records=records)
+
+    def list_evidence(self, user_id: str, category: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
+        where = "AND category=:category" if category else ""
+        with self._conn() as conn:
+            rows = conn.execute(
+                text(f"SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) {where} ORDER BY captured_at DESC LIMIT :limit"),
+                {"user_id": as_uuid(user_id), "category": category, "limit": limit},
+            ).mappings().all()
+        return [self._evidence_from_row(row) for row in rows]
 
     # ---- Money Intelligence extensions (Phase 1) ----
 

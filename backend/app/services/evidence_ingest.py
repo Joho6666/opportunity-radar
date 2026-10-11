@@ -4,7 +4,11 @@ import hashlib
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, HttpUrl
+
+EvidenceCategory = Literal["buyer", "content", "market"]
 
 
 class EvidenceInput(BaseModel):
@@ -15,6 +19,7 @@ class EvidenceInput(BaseModel):
     external_id: str | None = Field(default=None, max_length=300)
     published_at: datetime | None = None
     captured_at: datetime | None = None
+    category: EvidenceCategory = "market"
     buyer_type: str | None = Field(default=None, max_length=120)
     problem: str | None = Field(default=None, max_length=500)
     payment_signal: str | None = Field(default=None, max_length=500)
@@ -29,6 +34,8 @@ class EvidenceBatch(BaseModel):
 
 class EvidenceRecord(BaseModel):
     evidence_id: str
+    identity_key: str
+    batch_id: str
     source: str
     url: HttpUrl
     raw_text: str
@@ -36,6 +43,7 @@ class EvidenceRecord(BaseModel):
     external_id: str | None = None
     published_at: datetime | None = None
     captured_at: datetime
+    category: EvidenceCategory = "market"
     buyer_type: str | None = None
     problem: str | None = None
     payment_signal: str | None = None
@@ -45,9 +53,23 @@ class EvidenceRecord(BaseModel):
     verification_status: str = "unverified"
 
 
+class EvidenceUpsertResult(BaseModel):
+    batch_id: str
+    inserted: int
+    duplicates: int
+    records: list[EvidenceRecord]
+
+
 def _canonical_url(url: str) -> str:
     parts = urlsplit(url)
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), parts.query, ""))
+
+
+def evidence_identity(item: EvidenceInput) -> str:
+    canonical_url = _canonical_url(str(item.url))
+    return item.external_id or hashlib.sha256(
+        f"{item.source}|{canonical_url}|{item.raw_text.strip()}".encode("utf-8")
+    ).hexdigest()
 
 
 def normalize_evidence(batch: EvidenceBatch, now: datetime | None = None) -> list[EvidenceRecord]:
@@ -56,15 +78,14 @@ def normalize_evidence(batch: EvidenceBatch, now: datetime | None = None) -> lis
     result: list[EvidenceRecord] = []
     seen: set[str] = set()
     for item in batch.items:
-        canonical_url = _canonical_url(str(item.url))
-        identity = item.external_id or hashlib.sha256(
-            f"{item.source}|{canonical_url}|{item.raw_text.strip()}".encode("utf-8")
-        ).hexdigest()
+        identity = evidence_identity(item)
         if identity in seen:
             continue
         seen.add(identity)
         evidence_id = hashlib.sha256(f"{batch.batch_id}|{identity}".encode("utf-8")).hexdigest()[:24]
         payload = item.model_dump()
+        payload["identity_key"] = identity
+        payload["batch_id"] = batch.batch_id
         payload["captured_at"] = item.captured_at or captured_at
         result.append(
             EvidenceRecord(

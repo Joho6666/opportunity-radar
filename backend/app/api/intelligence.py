@@ -4,7 +4,7 @@ from ..api.deps import get_current_user, get_repository
 from ..core.security import CurrentUser
 from ..repositories.base import Repository
 from ..schemas.intelligence import ChangeEventRead, EventClusterRead, PainPointRead, SignalRead, SourceHealthRead, TrendTopicRead
-from ..schemas.evidence import EvidenceBatch, EvidenceRecord
+from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult
 from ..services.evidence_ingest import normalize_evidence
 
 router = APIRouter(prefix="/api/intelligence", tags=["Intelligence"])
@@ -17,6 +17,25 @@ async def preview_evidence(
 ):
     """Normalize a collector batch before persistence; this endpoint is intentionally side-effect free."""
     return normalize_evidence(batch)
+
+
+@router.post("/evidence/batches", response_model=EvidenceUpsertResult)
+async def ingest_evidence(
+    batch: EvidenceBatch,
+    user: CurrentUser = Depends(get_current_user),
+    repo: Repository = Depends(get_repository),
+):
+    return repo.upsert_evidence_batch(user.id, batch)
+
+
+@router.get("/evidence", response_model=list[EvidenceRecord])
+async def list_evidence(
+    category: str | None = Query(default=None, pattern="^(buyer|content|market)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: CurrentUser = Depends(get_current_user),
+    repo: Repository = Depends(get_repository),
+):
+    return repo.list_evidence(user.id, category=category, limit=limit)
 
 
 @router.get("/signals", response_model=list[SignalRead])
