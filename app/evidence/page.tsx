@@ -13,7 +13,13 @@ import {
   type EvidenceRecord,
 } from "@/lib/evidence-client";
 
-const labels: Record<EvidenceCategory, string> = { buyer: "Buyer", content: "Content", market: "Market" };
+const labels: Record<EvidenceCategory, string> = { buyer: "潜在购买需求", content: "内容问题", market: "市场变化" };
+
+function classificationLabel(record: EvidenceRecord) {
+  if (record.classification_source === "rule_v1") return "规则分类";
+  if (record.classification_source === "manual") return "人工分类";
+  return "未分类";
+}
 
 function formatDate(value: string | null) {
   if (!value) return "Not provided";
@@ -28,7 +34,8 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-indigo-400/40 bg-indigo-400/10 px-2 py-1 text-xs text-indigo-200">{labels[record.category]}</span>
-            <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs text-amber-200">Unverified</span>
+            <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs text-amber-200">未核实</span>
+            <span className="rounded-full border border-slate-400/40 bg-slate-400/10 px-2 py-1 text-xs text-slate-300">{classificationLabel(record)}</span>
           </div>
           <p className="mt-3 text-sm font-medium text-mist">{record.source}</p>
         </div>
@@ -37,6 +44,11 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
         </a>
       </div>
       <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-200">{record.raw_text}</p>
+      {(record.source_platform || record.acquisition_tool || record.classification_reason) && <dl className="mt-5 grid gap-3 border-t border-line pt-4 text-xs sm:grid-cols-3">
+        <div><dt className="text-muted">原始平台</dt><dd className="mt-1 text-slate-300">{record.source_platform || "未记录"}</dd></div>
+        <div><dt className="text-muted">采集工具</dt><dd className="mt-1 text-slate-300">{record.acquisition_tool || record.source}</dd></div>
+        <div><dt className="text-muted">分类理由</dt><dd className="mt-1 text-slate-300">{record.classification_reason || "未记录"}</dd></div>
+      </dl>}
       <dl className="mt-5 grid gap-3 border-t border-line pt-4 text-xs sm:grid-cols-3">
         <div><dt className="text-muted">Published</dt><dd className="mt-1 text-slate-300">{formatDate(record.published_at)}</dd></div>
         <div><dt className="text-muted">Captured</dt><dd className="mt-1 text-slate-300">{formatDate(record.captured_at)}</dd></div>

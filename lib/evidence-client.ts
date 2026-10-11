@@ -13,6 +13,12 @@ export type EvidenceRecord = {
   category: EvidenceCategory;
   payment_signal: string | null;
   verification_status: string;
+  classification_source?: string;
+  classification_reason?: string;
+  classification_confidence?: number;
+  source_platform?: string;
+  acquisition_tool?: string;
+  metadata?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
