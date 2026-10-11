@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
+
+from pydantic import BaseModel, Field, HttpUrl
+
+
+class EvidenceInput(BaseModel):
+    source: str = Field(min_length=1, max_length=80)
+    url: HttpUrl
+    raw_text: str = Field(min_length=10, max_length=20_000)
+    query: str = Field(default="", max_length=500)
+    external_id: str | None = Field(default=None, max_length=300)
+    published_at: datetime | None = None
+    captured_at: datetime | None = None
+    buyer_type: str | None = Field(default=None, max_length=120)
+    problem: str | None = Field(default=None, max_length=500)
+    payment_signal: str | None = Field(default=None, max_length=500)
+    urgency_signal: str | None = Field(default=None, max_length=500)
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class EvidenceBatch(BaseModel):
+    batch_id: str = Field(min_length=1, max_length=120)
+    items: list[EvidenceInput] = Field(min_length=1, max_length=500)
+
+
+class EvidenceRecord(BaseModel):
+    evidence_id: str
+    source: str
+    url: HttpUrl
+    raw_text: str
+    query: str = ""
+    external_id: str | None = None
+    published_at: datetime | None = None
+    captured_at: datetime
+    buyer_type: str | None = None
+    problem: str | None = None
+    payment_signal: str | None = None
+    urgency_signal: str | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+    evidence_grade: str = "C"
+    verification_status: str = "unverified"
+
+
+def _canonical_url(url: str) -> str:
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), parts.query, ""))
+
+
+def normalize_evidence(batch: EvidenceBatch, now: datetime | None = None) -> list[EvidenceRecord]:
+    """Normalize a batch and remove duplicate evidence without discarding raw text."""
+    captured_at = now or datetime.now(timezone.utc)
+    result: list[EvidenceRecord] = []
+    seen: set[str] = set()
+    for item in batch.items:
+        canonical_url = _canonical_url(str(item.url))
+        identity = item.external_id or hashlib.sha256(
+            f"{item.source}|{canonical_url}|{item.raw_text.strip()}".encode("utf-8")
+        ).hexdigest()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        evidence_id = hashlib.sha256(f"{batch.batch_id}|{identity}".encode("utf-8")).hexdigest()[:24]
+        payload = item.model_dump()
+        payload["captured_at"] = item.captured_at or captured_at
+        result.append(
+            EvidenceRecord(
+                **payload,
+                evidence_id=evidence_id,
+            )
+        )
+    return result

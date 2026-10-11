@@ -58,6 +58,15 @@ def _hours_since(value: datetime | None, now: datetime) -> float | None:
     return max(0.0, (now - value).total_seconds() / 3600)
 
 
+def align_vectors_to_items(items, vectors, known_urls: set[str]):
+    """Keep each embedding paired with its original item after known-item filtering."""
+    if vectors is None:
+        return [(item, None) for item in items if item.url not in known_urls]
+    if len(vectors) != len(items):
+        raise ValueError("embedding count must match item count")
+    return [(item, vectors[index]) for index, item in enumerate(items) if item.url not in known_urls]
+
+
 def _looks_relevant(item, radar: RadarCreate) -> bool:
     """Stage 0.5 keyword gate: keep items that mention any radar keyword (or a
     significant goal token). Items matching nothing skip the expensive LLM call."""
@@ -103,7 +112,9 @@ class RadarRunService:
             vectors = embed_texts([f"{item.title} {item.content}" for item in timed]) if timed else []
             if vectors is not None:
                 stage.embedding_calls = 1
-            fresh = [item for item in timed if not self.repository.has_raw(radar.id, item.url)]
+            known_urls = {item.url for item in timed if self.repository.has_raw(radar.id, item.url)}
+            fresh = [item for item in timed if item.url not in known_urls]
+            aligned = align_vectors_to_items(timed, vectors, known_urls)
             stage.after_known = len(fresh)
             known = len(timed) - len(fresh)
             created = []
@@ -127,8 +138,7 @@ class RadarRunService:
             cluster_rep_text: dict[str, str] = {}
             trend_keywords: dict[str, int] = defaultdict(int)
             profile_skills = [skill.name for skill in profile.skills]
-            for index, item in enumerate(fresh):
-                vector = vectors[index] if vectors else None
+            for item, vector in aligned:
                 if vector is not None and self.repository.find_similar_raw(radar.id, vector) is not None:
                     # cross-run L4: this content (or a paraphrase) is already in history
                     semantic_removed += 1
