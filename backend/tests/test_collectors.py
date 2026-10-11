@@ -3,6 +3,7 @@ import pytest
 from app.collectors.base import SourceAdapter
 from app.collectors.github import GitHubCollector
 from app.collectors.hackernews import HackerNewsCollector
+from app.collectors.tikhub import TikHubCollector
 from app.collectors.http import validate_public_url
 from app.collectors.mock import MockCollector
 from app.collectors.registry import CollectorRegistry
@@ -51,6 +52,25 @@ def test_hackernews_collector_maps_raw_items(monkeypatch):
     assert items[0].source == "hackernews"
     assert items[0].external_id == "42"
     assert items[0].title.startswith("Show HN")
+
+
+def test_tikhub_collector_maps_tiktok_search(monkeypatch):
+    class Settings:
+        tikhub_api_key = "test-token"
+
+    async def fake_json(url, **kwargs):
+        assert "keyword=AI" in url
+        assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+        return {"code": 200, "data": {"data": [{"item": {"id": "123", "desc": "AI video ad", "createTime": 1760000000, "author": {"uniqueId": "creator", "nickname": "Creator"}, "stats": {"diggCount": 4, "commentCount": 2, "playCount": 100}}}]}}
+
+    monkeypatch.setattr("app.collectors.tikhub.get_settings", lambda: Settings())
+    monkeypatch.setattr("app.collectors.tikhub.fetcher.get_json", fake_json)
+    items = asyncio.run(TikHubCollector().search("AI"))
+    assert len(items) == 1
+    assert items[0].source == "tikhub"
+    assert items[0].external_id == "123"
+    assert items[0].url == "https://www.tiktok.com/@creator/video/123"
+    assert items[0].engagement["plays"] == 100
 
 
 class BoomCollector(SourceAdapter):

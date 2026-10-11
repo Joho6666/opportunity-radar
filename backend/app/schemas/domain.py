@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl
 OpportunityType = Literal["job", "client", "project", "business", "github"]
 OpportunityStatus = Literal["new", "saved", "contacted", "negotiating", "won", "lost", "ignored"]
 RadarStatus = Literal["active", "paused", "running", "error"]
-SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search"]
+SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search", "tikhub"]
 
 
 class SkillInput(BaseModel):

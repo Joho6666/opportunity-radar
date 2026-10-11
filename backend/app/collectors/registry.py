@@ -8,6 +8,7 @@ from .github import GitHubCollector
 from .hackernews import HackerNewsCollector
 from .mock import MockCollector
 from .rss import RssCollector
+from .tikhub import TikHubCollector
 from .web_search import WebSearchCollector
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ def default_collectors(include_mock: bool | None = None) -> list[SourceAdapter]:
 
     if include_mock is None:
         include_mock = os.getenv("INCLUDE_MOCK_COLLECTOR", "true").lower() != "false"
-    collectors: list[SourceAdapter] = [GitHubCollector(), HackerNewsCollector(), RssCollector(), WebSearchCollector()]
+    collectors: list[SourceAdapter] = [GitHubCollector(), HackerNewsCollector(), RssCollector(), TikHubCollector(), WebSearchCollector()]
     if include_mock:
         collectors.append(MockCollector())
     return collectors

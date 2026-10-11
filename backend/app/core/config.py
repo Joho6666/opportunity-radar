@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     llm_fast_model: str = ""
     firecrawl_api_key: str = ""
     github_token: str = ""
+    tikhub_api_key: str = ""
     rss_feeds: str = "https://hnrss.org/newest,https://github.blog/feed/"
     redis_url: str = ""
     cors_origins: str = "http://127.0.0.1:3001,http://localhost:3000"
