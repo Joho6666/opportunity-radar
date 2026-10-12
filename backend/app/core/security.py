@@ -13,6 +13,8 @@ class CurrentUser:
 
 async def current_user(authorization: str | None = Header(default=None)) -> CurrentUser:
     settings = get_settings()
+    if settings.auth_disabled:
+        return CurrentUser(id=settings.local_user_id, email="local@opportunity-radar")
     if not authorization or not authorization.startswith("Bearer "):
         raise AppError("UNAUTHORIZED", "请先登录。", 401)
     token = authorization.removeprefix("Bearer ")

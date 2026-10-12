@@ -4,6 +4,8 @@ import { createServerClient } from "@supabase/ssr";
 const protectedPrefixes = ["/dashboard", "/opportunities", "/radars", "/daily-brief", "/pipeline", "/saved", "/skills", "/profile", "/settings"];
 
 export async function middleware(request: NextRequest) {
+  // 本机单用户模式显式关闭登录；公网部署必须保持 false。
+  if (process.env.NEXT_PUBLIC_AUTH_DISABLED === "true") return NextResponse.next();
   // 演示模式（未关闭 Mock）下不做路由保护，保证开箱即用。
   if (process.env.NEXT_PUBLIC_USE_MOCK !== "false") return NextResponse.next();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

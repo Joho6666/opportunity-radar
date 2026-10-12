@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""
+    auth_disabled: bool = False
+    local_user_id: str = "00000000-0000-0000-0000-000000000001"
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
