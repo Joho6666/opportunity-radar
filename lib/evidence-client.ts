@@ -121,3 +121,11 @@ export async function collectEvidence(source: EvidenceSource, query: string, man
     body: JSON.stringify({ manual_confirmed: manualConfirmed }),
   });
 }
+
+export type EvidenceReviewInput = { verification_status?: string; category?: EvidenceCategory; notes?: string; title?: string; summary?: string; budget_min?: number | null; budget_max?: number | null };
+export async function reviewEvidence(evidenceId: string, input: EvidenceReviewInput): Promise<EvidenceRecord> {
+  return request<EvidenceRecord>(`/api/intelligence/evidence/${evidenceId}/review`, { method: "PATCH", body: JSON.stringify(input) });
+}
+export async function convertEvidence(evidenceId: string, input: Pick<EvidenceReviewInput, "title" | "summary" | "budget_min" | "budget_max"> = {}) {
+  return request<Record<string, unknown>>(`/api/intelligence/evidence/${evidenceId}/convert`, { method: "POST", body: JSON.stringify(input) });
+}

@@ -9,7 +9,7 @@ from ..core.config import get_settings
 from ..core.errors import AppError
 from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, QueryPlanItem, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem, SkillInput
 from ..schemas.intelligence import ChangeEventRead, EventClusterRead, SignalRead, SourceHealthRead, TrendSnapshotRead, TrendTopicRead
-from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult
+from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult, EvidenceReview
 from ..services.evidence_ingest import normalize_evidence
 
 
@@ -390,8 +390,8 @@ class PostgresRepository:
         hours = max(float(item.estimated_hours or 1), 1)
         conn.execute(
             text(
-                "INSERT INTO opportunities (id, user_id, radar_id, type, title, summary, source, source_url, published_at, location, work_mode, budget_min, budget_max, currency, estimated_hours, match_score, opportunity_score, conversion_probability, risk_score, recommendation, status, actual_revenue, actual_hours, closed_at, money_score, money_breakdown, information_edge, information_edge_breakdown, verification_status) "
-                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), CAST(:radar_id AS uuid), CAST(:type AS opportunity_type), :title, :summary, :source, :source_url, :published_at, :location, :work_mode, :budget_min, :budget_max, :currency, :estimated_hours, :match_score, :opportunity_score, :conversion_probability, :risk_score, :recommendation, CAST(:status AS opportunity_status), :actual_revenue, :actual_hours, :closed_at, :money_score, CAST(:money_breakdown AS jsonb), :information_edge, CAST(:information_edge_breakdown AS jsonb), :verification_status) "
+                "INSERT INTO opportunities (id, user_id, radar_id, type, title, summary, source, source_url, published_at, location, work_mode, budget_min, budget_max, currency, estimated_hours, match_score, opportunity_score, conversion_probability, risk_score, recommendation, status, actual_revenue, actual_hours, closed_at, money_score, money_breakdown, information_edge, information_edge_breakdown, verification_status, evidence_id, metadata) "
+                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), CAST(:radar_id AS uuid), CAST(:type AS opportunity_type), :title, :summary, :source, :source_url, :published_at, :location, :work_mode, :budget_min, :budget_max, :currency, :estimated_hours, :match_score, :opportunity_score, :conversion_probability, :risk_score, :recommendation, CAST(:status AS opportunity_status), :actual_revenue, :actual_hours, :closed_at, :money_score, CAST(:money_breakdown AS jsonb), :information_edge, CAST(:information_edge_breakdown AS jsonb), :verification_status, :evidence_id, CAST(:metadata AS jsonb)) "
                 "ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, status=EXCLUDED.status, match_score=EXCLUDED.match_score, opportunity_score=EXCLUDED.opportunity_score, conversion_probability=EXCLUDED.conversion_probability, risk_score=EXCLUDED.risk_score, recommendation=EXCLUDED.recommendation, actual_revenue=EXCLUDED.actual_revenue, actual_hours=EXCLUDED.actual_hours, closed_at=EXCLUDED.closed_at, money_score=EXCLUDED.money_score, money_breakdown=EXCLUDED.money_breakdown, information_edge=EXCLUDED.information_edge, information_edge_breakdown=EXCLUDED.information_edge_breakdown, verification_status=EXCLUDED.verification_status, updated_at=NOW()"
             ),
             {
@@ -424,6 +424,8 @@ class PostgresRepository:
                 "information_edge": item.information_edge,
                 "information_edge_breakdown": json.dumps(item.information_edge_breakdown) if item.information_edge_breakdown else None,
                 "verification_status": item.verification_status,
+                "evidence_id": item.evidence_id,
+                "metadata": json.dumps(item.metadata),
             },
         )
         oid = as_uuid(item.id)
@@ -481,6 +483,8 @@ class PostgresRepository:
             information_edge=row["information_edge"] if "information_edge" in row.keys() else None,
             information_edge_breakdown=edge_breakdown,
             verification_status=row["verification_status"] if "verification_status" in row.keys() and row["verification_status"] else "unverified",
+            evidence_id=row["evidence_id"] if "evidence_id" in row.keys() else None,
+            metadata=row["metadata"] if "metadata" in row.keys() and row["metadata"] else {},
         )
 
     def record_action(self, opportunity_id: str, payload: OpportunityAction, action: str | None = None) -> OpportunityAction:
@@ -650,8 +654,8 @@ class PostgresRepository:
                 result = conn.execute(
                     text(
                         "INSERT INTO evidence_items "
-                        "(user_id, identity_key, batch_id, source, source_platform, acquisition_tool, url, external_id, raw_text, query, published_at, captured_at, category, buyer_type, problem, payment_signal, urgency_signal, metadata, evidence_grade, verification_status, classification_source, classification_reason, classification_confidence) "
-                        "VALUES (CAST(:user_id AS uuid), :identity_key, :batch_id, :source, :source_platform, :acquisition_tool, :url, :external_id, :raw_text, :query, :published_at, :captured_at, :category, :buyer_type, :problem, :payment_signal, :urgency_signal, CAST(:metadata AS jsonb), :evidence_grade, :verification_status, :classification_source, :classification_reason, :classification_confidence) "
+                        "(user_id, identity_key, batch_id, source, source_platform, acquisition_tool, url, external_id, raw_text, query, published_at, captured_at, category, buyer_type, problem, payment_signal, urgency_signal, metadata, evidence_grade, verification_status, classification_source, classification_reason, classification_confidence, notes) "
+                        "VALUES (CAST(:user_id AS uuid), :identity_key, :batch_id, :source, :source_platform, :acquisition_tool, :url, :external_id, :raw_text, :query, :published_at, :captured_at, :category, :buyer_type, :problem, :payment_signal, :urgency_signal, CAST(:metadata AS jsonb), :evidence_grade, :verification_status, :classification_source, :classification_reason, :classification_confidence, :notes) "
                         "ON CONFLICT (user_id, identity_key) DO NOTHING RETURNING id"
                     ),
                     {
@@ -678,6 +682,7 @@ class PostgresRepository:
                         "classification_source": record.classification_source,
                         "classification_reason": record.classification_reason,
                         "classification_confidence": record.classification_confidence,
+                        "notes": record.notes,
                     },
                 )
                 if result.first() is not None:
@@ -701,6 +706,35 @@ class PostgresRepository:
                 {"user_id": as_uuid(user_id), "category": category, "limit": limit},
             ).mappings().all()
         return [self._evidence_from_row(row) for row in rows]
+
+    def get_evidence(self, user_id: str, evidence_id: str) -> EvidenceRecord:
+        with self._conn() as conn:
+            row = conn.execute(text("SELECT * FROM evidence_items WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {"id": evidence_id, "uid": as_uuid(user_id)}).mappings().first()
+        if row is None: raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+        return self._evidence_from_row(row)
+
+    def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
+        evidence = self.get_evidence(user_id, evidence_id)
+        if evidence.verification_status != "verified" or evidence.category != "buyer":
+            raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
+        if evidence.converted_opportunity_id:
+            return self.get_opportunity(user_id, evidence.converted_opportunity_id)
+        saved = self.add_opportunity(item, user_id)
+        self.review_evidence(user_id, evidence_id, EvidenceReview(converted_opportunity_id=saved.id))
+        return saved
+
+    def review_evidence(self, user_id: str, evidence_id: str, review: EvidenceReview) -> EvidenceRecord:
+        current = self.get_evidence(user_id, evidence_id)
+        data = review.model_dump(exclude_none=True)
+        metadata = dict(current.metadata)
+        for key in ("title", "summary", "budget_min", "budget_max"):
+            if key in data: metadata[key] = data.pop(key)
+        fields = {key: value for key, value in data.items() if key in {"verification_status", "category", "notes", "converted_opportunity_id"}}
+        fields["metadata"] = json.dumps(metadata)
+        assignments = ", ".join(f"{key}=CAST(:{key} AS jsonb)" if key == "metadata" else f"{key}=:{key}" for key in fields)
+        with self._conn() as conn:
+            conn.execute(text("UPDATE evidence_items SET " + assignments + " WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {**fields, "id": evidence_id, "uid": as_uuid(user_id)})
+        return self.get_evidence(user_id, evidence_id)
 
     # ---- Money Intelligence extensions (Phase 1) ----
 

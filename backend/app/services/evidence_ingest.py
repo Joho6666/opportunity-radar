@@ -61,6 +61,8 @@ class EvidenceRecord(BaseModel):
     classification_confidence: float = Field(default=0.0, ge=0, le=1)
     source_platform: str = ""
     acquisition_tool: str = ""
+    notes: str = ""
+    converted_opportunity_id: str | None = None
 
 
 class EvidenceUpsertResult(BaseModel):

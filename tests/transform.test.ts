@@ -12,6 +12,9 @@ describe("backend field transforms", () => {
     expect(item.status).toBe("new");
     expect(item.publishedAt).not.toBe("未知时间");
   });
+  it("preserves actual revenue returned by the API", () => {
+    expect(toOpportunity({ id: "o2", actual_revenue: 1250 }).actualRevenue).toBe(1250);
+  });
   it("maps RadarRead including stats and status", () => {
     const raw = { id: "r1", name: "雷达", description: "", goal: "g", status: "active", keywords: ["PPT"], locations: ["桂林"], minimum_budget: 200, frequency: "daily", last_run_at: null, next_run_at: null, stats: { items_found: 8, opportunities_found: 4, matched: 3, recommended: 2 } };
     const radar = toRadar(raw);

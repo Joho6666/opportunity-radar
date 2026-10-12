@@ -12,6 +12,8 @@ import {
   fetchEvidenceRuntime,
   parseEvidenceImport,
   uploadEvidence,
+  reviewEvidence,
+  convertEvidence,
   type EvidenceCategory,
   type EvidenceRecord,
   type EvidenceRuntime,
@@ -57,7 +59,7 @@ function formatEngagement(record: EvidenceRecord) {
   }
 }
 
-function EvidenceCard({ record }: { record: EvidenceRecord }) {
+function EvidenceCard({ record, onReview, onConvert }: { record: EvidenceRecord; onReview: (id: string, input: Record<string, unknown>) => Promise<void>; onConvert: (id: string, input: Record<string, unknown>) => Promise<void> }) {
   const engagement = formatEngagement(record);
   return (
     <article className="rounded-xl border border-line bg-panel/80 p-5 transition hover:border-indigo-400/40 hover:bg-panel">
@@ -87,8 +89,26 @@ function EvidenceCard({ record }: { record: EvidenceRecord }) {
         <div><p className="text-muted">付款信号</p><p className="mt-1 text-signal">{record.payment_signal ?? "未发现"}</p></div>
       </div>
       {engagement && <p className="mt-3 text-xs text-muted">互动数据：<span className="text-slate-300">{engagement}</span></p>}
+      <EvidenceReviewControls record={record} onReview={onReview} onConvert={onConvert} />
     </article>
   );
+}
+
+function EvidenceReviewControls({ record, onReview, onConvert }: { record: EvidenceRecord; onReview: (id: string, input: Record<string, unknown>) => Promise<void>; onConvert: (id: string, input: Record<string, unknown>) => Promise<void> }) {
+  const [notes, setNotes] = useState(String(record.notes ?? ""));
+  const [busy, setBusy] = useState(false);
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  async function run(action: () => Promise<void>) { setBusy(true); try { await action(); } finally { setBusy(false); } }
+  return <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
+    <select aria-label="修正分类" value={record.category} disabled={busy} onChange={(event) => void run(() => onReview(record.evidence_id, { category: event.target.value }))} className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist">{EVIDENCE_CATEGORIES.map((item) => <option key={item} value={item}>{labels[item]}</option>)}</select>
+    <input aria-label="复核备注" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="复核备注" maxLength={2000} className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist" />
+    <Button disabled={busy} variant="secondary" onClick={() => void run(() => onReview(record.evidence_id, { notes }))}>保存备注</Button>
+    <Button disabled={busy} variant="secondary" onClick={() => void run(() => onReview(record.evidence_id, { verification_status: "verified", notes }))}>人工核实</Button>
+    <Button disabled={busy} variant="secondary" onClick={() => void run(() => onReview(record.evidence_id, { verification_status: "invalidated", notes }))}>排除</Button>
+    {record.verification_status === "verified" && record.category === "buyer" && <><input aria-label="机会标题" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="机会标题（必填）" className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist" /><input aria-label="机会摘要" value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="机会摘要（必填）" className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist" /><Button disabled={busy || !title.trim() || !summary.trim()} onClick={() => void run(() => onConvert(record.evidence_id, { title, summary, budget_min: null, budget_max: null }))}>转为机会</Button></>}
+    {busy && <Loader2 className="animate-spin" size={16} />}
+  </div>;
 }
 
 function EvidenceInbox() {
@@ -106,6 +126,7 @@ function EvidenceInbox() {
   const [manualConfirmed, setManualConfirmed] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [collectState, setCollectState] = useState<string | null>(null);
+  const [actionState, setActionState] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -150,6 +171,9 @@ function EvidenceInbox() {
     finally { setImporting(false); }
   }
 
+  async function review(id: string, input: Record<string, unknown>) { setActionState(null); try { await reviewEvidence(id, input); await load(); } catch (reason) { setActionState(reason instanceof Error ? reason.message : "复核失败"); } }
+  async function convert(id: string, input: Record<string, unknown>) { setActionState(null); try { await convertEvidence(id, input); setActionState("已转为机会"); await load(); } catch (reason) { setActionState(reason instanceof Error ? reason.message : "转换失败"); } }
+
   async function readFile(file: File) {
     setImportState(null);
     try { setImportText(await file.text()); setImportOpen(true); }
@@ -164,6 +188,7 @@ function EvidenceInbox() {
         action={<div className="flex gap-2"><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> 刷新</Button><Button onClick={() => setImportOpen((value) => !value)}><Upload size={15} /> 导入</Button></div>}
       />
 
+      {actionState && <Panel className="mb-5 p-3 text-sm text-muted">{actionState}</Panel>}
       {runtime?.warning && <Panel className="mb-5 border-amber-400/30 p-4 text-sm text-amber-100">{runtime.warning}</Panel>}
       <Panel className="mb-5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-medium text-mist">手动采集真实来源</h2><p className="mt-1 text-xs text-muted">只运行一次搜索，不自动翻页；结果会保留原文并去重。</p></div><span className="text-xs text-muted">{runtime ? `存储：${runtime.storage_mode === "memory" ? "内存" : "PostgreSQL"}` : "正在读取运行状态…"}</span></div>
@@ -197,7 +222,7 @@ function EvidenceInbox() {
       {loading && <Panel className="flex items-center justify-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18} /> 正在加载证据…</Panel>}
       {!loading && error && <Panel className="border-red-400/30 p-6"><div className="flex items-start gap-3 text-red-200"><AlertCircle size={19} className="mt-0.5 shrink-0" /><div><p className="font-medium">加载失败</p><p className="mt-1 text-sm text-red-200/80">{error}</p><Button className="mt-4" variant="secondary" onClick={() => void load()}>重试</Button></div></div></Panel>}
       {!loading && !error && records.filter((record) => record.category === category).length === 0 && <EmptyState title={`还没有${labels[category]}`}><p className="text-sm text-muted">可以先运行一个雷达，或者导入一批真实来源数据。</p><Button className="mt-5" onClick={() => setImportOpen(true)}>导入第一批证据</Button></EmptyState>}
-      {!loading && !error && records.filter((record) => record.category === category).length > 0 && <div className="space-y-4">{records.filter((record) => record.category === category).map((record) => <EvidenceCard key={record.evidence_id} record={record} />)}</div>}
+      {!loading && !error && records.filter((record) => record.category === category).length > 0 && <div className="space-y-4">{records.filter((record) => record.category === category).map((record) => <EvidenceCard key={record.evidence_id} record={record} onReview={review} onConvert={convert} />)}</div>}
     </>
   );
 }

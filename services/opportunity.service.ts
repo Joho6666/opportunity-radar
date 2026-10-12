@@ -11,12 +11,17 @@ export async function listOpportunities(): Promise<Opportunity[]> {
   return (await api.opportunities.list(token)).map(toOpportunity);
 }
 
-export async function actOpportunity(id: string, status: OpportunityStatus): Promise<void> {
+export async function actOpportunity(id: string, status: OpportunityStatus, actualRevenue?: number): Promise<Opportunity | undefined> {
   const action = statusActionMap[status];
-  if (!action) return;
+  if (!action) return undefined;
+  if (useMockMode) {
+    const item = mockOpportunities.find((opportunity) => opportunity.id === id);
+    if (item) { item.status = status; if (typeof actualRevenue === "number") item.actualRevenue = actualRevenue; }
+    return item;
+  }
   const token = await getAccessToken();
-  if (!token) return;
-  await api.opportunities.action(id, action, token);
+  if (!token) throw new Error("尚未登录");
+  return toOpportunity(await api.opportunities.action(id, action, token, typeof actualRevenue === "number" ? { actual_revenue: actualRevenue } : {}));
 }
 
 export async function analyzeOpportunity(id: string) {

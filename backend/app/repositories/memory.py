@@ -8,6 +8,7 @@ from ..services.dedup_service import hash_url
 from ..services.daily_intelligence import assemble
 from ..services.income import potential_income_range
 from ..services.evidence_ingest import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult, normalize_evidence
+from ..schemas.evidence import EvidenceReview
 
 
 class MemoryRepository:
@@ -255,6 +256,30 @@ class MemoryRepository:
         records = [record for (owner, _), record in self.evidence.items() if owner == user_id and (category is None or record.category == category)]
         records.sort(key=lambda record: record.captured_at, reverse=True)
         return records[:limit]
+
+    def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
+        # Synchronous mutation runs as one critical section (no awaits in API).
+        evidence = self.get_evidence(user_id, evidence_id)
+        if evidence.verification_status != "verified" or evidence.category != "buyer":
+            raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
+        if evidence.converted_opportunity_id:
+            return self.get_opportunity(user_id, evidence.converted_opportunity_id)
+        saved = self.add_opportunity(item, user_id)
+        self.evidence[(user_id, evidence.identity_key)] = evidence.model_copy(update={"converted_opportunity_id": saved.id})
+        return saved
+
+    def get_evidence(self, user_id: str, evidence_id: str) -> EvidenceRecord:
+        for (owner, _), record in self.evidence.items():
+            if owner == user_id and record.evidence_id == evidence_id:
+                return record
+        raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+
+    def review_evidence(self, user_id: str, evidence_id: str, review: EvidenceReview) -> EvidenceRecord:
+        record = self.get_evidence(user_id, evidence_id)
+        updates = review.model_dump(exclude_none=True)
+        stored = record.model_copy(update=updates)
+        self.evidence[(user_id, record.identity_key)] = stored
+        return stored
 
     # ---- Money Intelligence extensions ----
 

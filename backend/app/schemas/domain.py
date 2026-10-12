@@ -161,6 +161,8 @@ class OpportunityRead(BaseModel):
     information_edge: int | None = None
     information_edge_breakdown: dict | None = None
     verification_status: str = "unverified"
+    evidence_id: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class OpportunityAction(BaseModel):
