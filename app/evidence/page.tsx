@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, ExternalLink, FileJson, Loader2, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, ChevronDown, ExternalLink, FileJson, Loader2, RefreshCw, Upload } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Button, EmptyState, PageHeader, Panel } from "@/components/ui";
 import {
@@ -13,7 +13,17 @@ import {
   type EvidenceRecord,
 } from "@/lib/evidence-client";
 
-const labels: Record<EvidenceCategory, string> = { buyer: "潜在购买需求", content: "内容问题", market: "市场变化" };
+const labels: Record<EvidenceCategory, string> = {
+  buyer: "潜在购买需求",
+  content: "内容问题",
+  market: "市场变化",
+};
+
+const descriptions: Record<EvidenceCategory, string> = {
+  buyer: "原文出现找人、预算、报价或交付意图的候选信号。",
+  content: "适合转成教程、选题或服务内容的问题。",
+  market: "竞品案例、平台变化、广告趋势和供给侧信息。",
+};
 
 function classificationLabel(record: EvidenceRecord) {
   if (record.classification_source === "rule_v1") return "规则分类";
@@ -22,56 +32,76 @@ function classificationLabel(record: EvidenceRecord) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) return "Not provided";
+  if (!value) return "未提供";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatEngagement(record: EvidenceRecord) {
+  const raw = record.metadata?.engagement;
+  if (!raw) return null;
+  try {
+    const value = typeof raw === "string" ? JSON.parse(raw) as Record<string, unknown> : raw as Record<string, unknown>;
+    const labels: Record<string, string> = { plays: "播放", likes: "点赞", comments: "评论", shares: "分享" };
+    return Object.entries(labels)
+      .filter(([key]) => value[key] !== undefined && value[key] !== null)
+      .map(([key, label]) => `${label} ${Number(value[key]).toLocaleString("zh-CN")}`)
+      .join(" · ");
+  } catch {
+    return null;
+  }
 }
 
 function EvidenceCard({ record }: { record: EvidenceRecord }) {
+  const engagement = formatEngagement(record);
   return (
-    <article className="rounded-md border border-line bg-[#091b2d] p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <article className="rounded-xl border border-line bg-panel/80 p-5 transition hover:border-indigo-400/40 hover:bg-panel">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-indigo-400/40 bg-indigo-400/10 px-2 py-1 text-xs text-indigo-200">{labels[record.category]}</span>
-            <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs text-amber-200">未核实</span>
-            <span className="rounded-full border border-slate-400/40 bg-slate-400/10 px-2 py-1 text-xs text-slate-300">{classificationLabel(record)}</span>
+            <span className="rounded-full bg-indigo-400/10 px-2.5 py-1 text-xs font-medium text-indigo-200">{labels[record.category]}</span>
+            <span className="rounded-full bg-amber-400/10 px-2.5 py-1 text-xs text-amber-200">未核实</span>
+            <span className="rounded-full border border-line px-2.5 py-1 text-xs text-muted">{classificationLabel(record)}</span>
           </div>
-          <p className="mt-3 text-sm font-medium text-mist">{record.source}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="font-medium text-mist">{record.source_platform || record.source}</span>
+            {record.acquisition_tool && <span className="text-xs text-muted">采集：{record.acquisition_tool}</span>}
+          </div>
         </div>
-        <a className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-white" href={record.url} target="_blank" rel="noreferrer">
-          Open source <ExternalLink size={13} />
+        <a className="inline-flex shrink-0 items-center gap-1.5 rounded border border-line px-3 py-2 text-xs text-indigo-200 transition hover:border-indigo-300 hover:text-white" href={record.url} target="_blank" rel="noreferrer">
+          查看原文 <ExternalLink size={13} />
         </a>
       </div>
-      <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-200">{record.raw_text}</p>
-      {(record.source_platform || record.acquisition_tool || record.classification_reason) && <dl className="mt-5 grid gap-3 border-t border-line pt-4 text-xs sm:grid-cols-3">
-        <div><dt className="text-muted">原始平台</dt><dd className="mt-1 text-slate-300">{record.source_platform || "未记录"}</dd></div>
-        <div><dt className="text-muted">采集工具</dt><dd className="mt-1 text-slate-300">{record.acquisition_tool || record.source}</dd></div>
-        <div><dt className="text-muted">分类理由</dt><dd className="mt-1 text-slate-300">{record.classification_reason || "未记录"}</dd></div>
-      </dl>}
-      <dl className="mt-5 grid gap-3 border-t border-line pt-4 text-xs sm:grid-cols-3">
-        <div><dt className="text-muted">Published</dt><dd className="mt-1 text-slate-300">{formatDate(record.published_at)}</dd></div>
-        <div><dt className="text-muted">Captured</dt><dd className="mt-1 text-slate-300">{formatDate(record.captured_at)}</dd></div>
-        <div><dt className="text-muted">Payment signal</dt><dd className="mt-1 text-signal">{record.payment_signal ?? "None recorded"}</dd></div>
-      </dl>
+
+      <p className="mt-4 text-[15px] leading-7 text-slate-200">{record.raw_text}</p>
+
+      <div className="mt-5 grid gap-3 border-t border-line pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <div><p className="text-muted">分类理由</p><p className="mt-1 text-slate-300">{record.classification_reason || "未记录"}</p></div>
+        <div><p className="text-muted">发布时间</p><p className="mt-1 text-slate-300">{formatDate(record.published_at)}</p></div>
+        <div><p className="text-muted">采集时间</p><p className="mt-1 text-slate-300">{formatDate(record.captured_at)}</p></div>
+        <div><p className="text-muted">付款信号</p><p className="mt-1 text-signal">{record.payment_signal ?? "未发现"}</p></div>
+      </div>
+      {engagement && <p className="mt-3 text-xs text-muted">互动数据：<span className="text-slate-300">{engagement}</span></p>}
     </article>
   );
 }
 
 function EvidenceInbox() {
-  const [category, setCategory] = useState<EvidenceCategory>("buyer");
+  const [category, setCategory] = useState<EvidenceCategory>("market");
   const [records, setRecords] = useState<EvidenceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
   const [importState, setImportState] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (nextCategory = category) => {
     setLoading(true);
     setError(null);
     try { setRecords(await fetchEvidence(nextCategory)); }
-    catch (reason) { setRecords([]); setError(reason instanceof Error ? reason.message : "Could not load evidence."); }
+    catch (reason) { setRecords([]); setError(reason instanceof Error ? reason.message : "加载证据失败"); }
     finally { setLoading(false); }
   }, [category]);
 
@@ -79,36 +109,50 @@ function EvidenceInbox() {
 
   async function importEvidence() {
     setImportState(null);
+    setImporting(true);
     try {
       const items = parseEvidenceImport(importText);
       const result = await uploadEvidence(`frontend-${Date.now()}`, items);
       setImportText("");
-      setImportState(`Imported ${result.inserted} record${result.inserted === 1 ? "" : "s"}; ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"}.`);
+      setImportState(`已新增 ${result.inserted} 条，重复 ${result.duplicates} 条`);
+      setImportOpen(false);
       await load();
-    } catch (reason) { setImportState(reason instanceof Error ? reason.message : "Could not import evidence."); }
+    } catch (reason) { setImportState(reason instanceof Error ? reason.message : "导入失败"); }
+    finally { setImporting(false); }
   }
 
   async function readFile(file: File) {
     setImportState(null);
-    try { setImportText(await file.text()); }
-    catch { setImportState("Could not read that file."); }
+    try { setImportText(await file.text()); setImportOpen(true); }
+    catch { setImportState("无法读取该文件"); }
   }
 
   return (
     <>
-      <PageHeader title="Evidence inbox" description="Raw signals from the intelligence API. Every record is shown as unverified until reviewed." action={<Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Refresh</Button>} />
-      <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Evidence categories">
-        {EVIDENCE_CATEGORIES.map((item) => <button key={item} role="tab" aria-selected={category === item} onClick={() => setCategory(item)} className={`rounded px-4 py-2 text-sm transition ${category === item ? "bg-ai text-white" : "bg-panel text-muted hover:text-mist"}`}>{labels[item]}</button>)}
+      <PageHeader
+        title="证据收件箱"
+        description="先收集事实，再人工判断是否值得行动。所有自动分类默认未核实。"
+        action={<div className="flex gap-2"><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> 刷新</Button><Button onClick={() => setImportOpen((value) => !value)}><Upload size={15} /> 导入</Button></div>}
+      />
+
+      <div className="mb-5 grid gap-3 sm:grid-cols-3">
+        {EVIDENCE_CATEGORIES.map((item) => <button key={item} role="tab" aria-selected={category === item} onClick={() => setCategory(item)} className={`rounded-xl border p-4 text-left transition ${category === item ? "border-indigo-400/60 bg-indigo-400/10" : "border-line bg-panel/60 hover:border-slate-500"}`}>
+          <p className={`text-sm font-medium ${category === item ? "text-indigo-200" : "text-mist"}`}>{labels[item]}</p>
+          <p className="mt-1 text-xs leading-5 text-muted">{descriptions[item]}</p>
+        </button>)}
       </div>
-      <Panel className="mb-6 p-5">
-        <div className="flex items-center gap-2"><FileJson size={17} className="text-indigo-300" /><h2 className="font-medium text-mist">Import evidence JSON</h2></div>
-        <p className="mt-1 text-xs text-muted">Paste the API-shaped JSON array or load a .json file. Nothing is added until you submit it.</p>
-        <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='[{"source":"...","url":"https://...","raw_text":"..."}]' className="mt-4 min-h-28 w-full rounded border border-line bg-ink p-3 font-mono text-xs text-slate-200 outline-none focus:border-indigo-400" aria-label="Evidence JSON" />
-        <div className="mt-3 flex flex-wrap items-center gap-3"><input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} /><Button variant="secondary" onClick={() => fileInput.current?.click()}><Upload size={15} /> Load JSON file</Button><Button onClick={() => void importEvidence()} disabled={!importText.trim()}>Submit import</Button>{importState && <span className="text-sm text-muted">{importState}</span>}</div>
-      </Panel>
-      {loading && <Panel className="flex items-center justify-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18} /> Loading evidence…</Panel>}
-      {!loading && error && <Panel className="border-red-400/30 p-6"><div className="flex items-start gap-3 text-red-200"><AlertCircle size={19} className="mt-0.5 shrink-0" /><div><p className="font-medium">Could not load evidence</p><p className="mt-1 text-sm text-red-200/80">{error}</p><Button className="mt-4" variant="secondary" onClick={() => void load()}>Try again</Button></div></div></Panel>}
-      {!loading && !error && records.length === 0 && <EmptyState title={`No ${labels[category].toLowerCase()} evidence yet`}><p className="text-sm text-muted">The API returned no records for this category. Import verified source data above or try another category.</p></EmptyState>}
+
+      {importOpen && <Panel className="mb-5 p-5">
+        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><FileJson size={17} className="text-indigo-300" /><h2 className="font-medium text-mist">导入证据 JSON</h2></div><button className="text-muted hover:text-white" onClick={() => setImportOpen(false)} aria-label="关闭导入"><ChevronDown size={18} /></button></div>
+        <p className="mt-1 text-xs text-muted">支持证据数组。导入后会去重，原文不会被改写。</p>
+        <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='[{"source":"tikhub","url":"https://...","raw_text":"...","category":"market"}]' className="mt-4 min-h-32 w-full rounded-lg border border-line bg-ink p-3 font-mono text-xs text-slate-200 outline-none focus:border-indigo-400" aria-label="Evidence JSON" />
+        <div className="mt-3 flex flex-wrap items-center gap-3"><input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} /><Button variant="secondary" onClick={() => fileInput.current?.click()} disabled={importing}><Upload size={15} /> 读取文件</Button><Button onClick={() => void importEvidence()} disabled={!importText.trim() || importing}>{importing && <Loader2 size={15} className="animate-spin" />}{importing ? "导入中…" : "提交导入"}</Button>{importState && <span className="text-sm text-muted">{importState}</span>}</div>
+      </Panel>}
+
+      <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-mist">{labels[category]}</h2><p className="mt-1 text-xs text-muted">{loading ? "正在加载…" : `${records.length} 条记录`}</p></div><span className="rounded-full border border-line px-3 py-1 text-xs text-muted">默认仅供复核</span></div>
+      {loading && <Panel className="flex items-center justify-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18} /> 正在加载证据…</Panel>}
+      {!loading && error && <Panel className="border-red-400/30 p-6"><div className="flex items-start gap-3 text-red-200"><AlertCircle size={19} className="mt-0.5 shrink-0" /><div><p className="font-medium">加载失败</p><p className="mt-1 text-sm text-red-200/80">{error}</p><Button className="mt-4" variant="secondary" onClick={() => void load()}>重试</Button></div></div></Panel>}
+      {!loading && !error && records.length === 0 && <EmptyState title={`还没有${labels[category]}`}><p className="text-sm text-muted">可以先运行一个雷达，或者导入一批真实来源数据。</p><Button className="mt-5" onClick={() => setImportOpen(true)}>导入第一批证据</Button></EmptyState>}
       {!loading && !error && records.length > 0 && <div className="space-y-4">{records.map((record) => <EvidenceCard key={record.evidence_id} record={record} />)}</div>}
     </>
   );
