@@ -39,11 +39,20 @@ export type EvidenceInput = {
 };
 
 export type EvidenceBatchResult = {
-  batch_id: string;
+  batch_id: string | null;
   inserted: number;
   duplicates: number;
   records: EvidenceRecord[];
 };
+
+export const EVIDENCE_SOURCES = ["github", "hackernews", "rss", "tikhub", "web_search"] as const;
+export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+export type EvidenceRuntime = {
+  storage_mode: "memory" | "postgres";
+  warning: string | null;
+  sources: Record<EvidenceSource, { configured: boolean }>;
+};
+export type EvidenceCollectResult = EvidenceBatchResult & { fetched: number; rejected: number; warning: string | null };
 
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8011";
 
@@ -98,5 +107,17 @@ export async function uploadEvidence(batchId: string, items: EvidenceInput[]): P
   return request<EvidenceBatchResult>("/api/intelligence/evidence/batches", {
     method: "POST",
     body: JSON.stringify({ batch_id: batchId, items }),
+  });
+}
+
+export async function fetchEvidenceRuntime(): Promise<EvidenceRuntime> {
+  return request<EvidenceRuntime>("/api/intelligence/evidence/runtime");
+}
+
+export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean): Promise<EvidenceCollectResult> {
+  const params = new URLSearchParams({ source, query });
+  return request<EvidenceCollectResult>(`/api/intelligence/evidence/collect?${params.toString()}`, {
+    method: "POST",
+    body: JSON.stringify({ manual_confirmed: manualConfirmed }),
   });
 }

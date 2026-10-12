@@ -6,11 +6,16 @@ import { AppShell } from "@/components/app-shell";
 import { Button, EmptyState, PageHeader, Panel } from "@/components/ui";
 import {
   EVIDENCE_CATEGORIES,
+  EVIDENCE_SOURCES,
+  collectEvidence,
   fetchEvidence,
+  fetchEvidenceRuntime,
   parseEvidenceImport,
   uploadEvidence,
   type EvidenceCategory,
   type EvidenceRecord,
+  type EvidenceRuntime,
+  type EvidenceSource,
 } from "@/lib/evidence-client";
 
 const labels: Record<EvidenceCategory, string> = {
@@ -95,17 +100,41 @@ function EvidenceInbox() {
   const [importState, setImportState] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [runtime, setRuntime] = useState<EvidenceRuntime | null>(null);
+  const [source, setSource] = useState<EvidenceSource>("github");
+  const [query, setQuery] = useState("");
+  const [manualConfirmed, setManualConfirmed] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+  const [collectState, setCollectState] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async (nextCategory = category) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try { setRecords(await fetchEvidence(nextCategory)); }
+    try {
+      const [nextRecords, nextRuntime] = await Promise.all([
+        Promise.all(EVIDENCE_CATEGORIES.map((item) => fetchEvidence(item, 500))).then((groups) => groups.flat()),
+        fetchEvidenceRuntime(),
+      ]);
+      setRecords(nextRecords);
+      setRuntime(nextRuntime);
+    }
     catch (reason) { setRecords([]); setError(reason instanceof Error ? reason.message : "加载证据失败"); }
     finally { setLoading(false); }
-  }, [category]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  async function collect() {
+    if (!query.trim()) { setCollectState("请先填写搜索词"); return; }
+    setCollecting(true); setCollectState(null);
+    try {
+      const result = await collectEvidence(source, query.trim(), manualConfirmed);
+      setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，拒绝 ${result.rejected} 条`);
+      await load();
+    } catch (reason) { setCollectState(reason instanceof Error ? reason.message : "采集失败"); }
+    finally { setCollecting(false); }
+  }
 
   async function importEvidence() {
     setImportState(null);
@@ -135,6 +164,21 @@ function EvidenceInbox() {
         action={<div className="flex gap-2"><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> 刷新</Button><Button onClick={() => setImportOpen((value) => !value)}><Upload size={15} /> 导入</Button></div>}
       />
 
+      {runtime?.warning && <Panel className="mb-5 border-amber-400/30 p-4 text-sm text-amber-100">{runtime.warning}</Panel>}
+      <Panel className="mb-5 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-medium text-mist">手动采集真实来源</h2><p className="mt-1 text-xs text-muted">只运行一次搜索，不自动翻页；结果会保留原文并去重。</p></div><span className="text-xs text-muted">{runtime ? `存储：${runtime.storage_mode === "memory" ? "内存" : "PostgreSQL"}` : "正在读取运行状态…"}</span></div>
+        <div className="mt-4 grid gap-3 md:grid-cols-[170px_1fr_auto]">
+          <select value={source} onChange={(event) => setSource(event.target.value as EvidenceSource)} className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist">
+            {EVIDENCE_SOURCES.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} maxLength={200} placeholder="输入搜索词" className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-indigo-400" />
+          <Button onClick={() => void collect()} disabled={collecting || !runtime?.sources[source]?.configured || (source === "tikhub" || source === "web_search") && !manualConfirmed}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
+        </div>
+        {(source === "tikhub" || source === "web_search") && <label className="mt-3 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />我确认该来源可能产生费用，并授权本次采集</label>}
+        {runtime && !runtime.sources[source]?.configured && <p className="mt-2 text-xs text-amber-200">该来源未配置，已禁用采集。</p>}
+        {collectState && <p className="mt-3 text-sm text-muted">{collectState}</p>}
+      </Panel>
+
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         {EVIDENCE_CATEGORIES.map((item) => <button key={item} role="tab" aria-selected={category === item} onClick={() => setCategory(item)} className={`rounded-xl border p-4 text-left transition ${category === item ? "border-indigo-400/60 bg-indigo-400/10" : "border-line bg-panel/60 hover:border-slate-500"}`}>
           <p className={`text-sm font-medium ${category === item ? "text-indigo-200" : "text-mist"}`}>{labels[item]}</p>
@@ -149,11 +193,11 @@ function EvidenceInbox() {
         <div className="mt-3 flex flex-wrap items-center gap-3"><input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} /><Button variant="secondary" onClick={() => fileInput.current?.click()} disabled={importing}><Upload size={15} /> 读取文件</Button><Button onClick={() => void importEvidence()} disabled={!importText.trim() || importing}>{importing && <Loader2 size={15} className="animate-spin" />}{importing ? "导入中…" : "提交导入"}</Button>{importState && <span className="text-sm text-muted">{importState}</span>}</div>
       </Panel>}
 
-      <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-mist">{labels[category]}</h2><p className="mt-1 text-xs text-muted">{loading ? "正在加载…" : `${records.length} 条记录`}</p></div><span className="rounded-full border border-line px-3 py-1 text-xs text-muted">默认仅供复核</span></div>
+      {(() => { const visible = records.filter((record) => record.category === category); return <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-mist">{labels[category]}</h2><p className="mt-1 text-xs text-muted">{loading ? "正在加载…" : `${visible.length} 条记录（已加载全部分类）`}</p></div><span className="rounded-full border border-line px-3 py-1 text-xs text-muted">默认仅供复核</span></div>; })()}
       {loading && <Panel className="flex items-center justify-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18} /> 正在加载证据…</Panel>}
       {!loading && error && <Panel className="border-red-400/30 p-6"><div className="flex items-start gap-3 text-red-200"><AlertCircle size={19} className="mt-0.5 shrink-0" /><div><p className="font-medium">加载失败</p><p className="mt-1 text-sm text-red-200/80">{error}</p><Button className="mt-4" variant="secondary" onClick={() => void load()}>重试</Button></div></div></Panel>}
-      {!loading && !error && records.length === 0 && <EmptyState title={`还没有${labels[category]}`}><p className="text-sm text-muted">可以先运行一个雷达，或者导入一批真实来源数据。</p><Button className="mt-5" onClick={() => setImportOpen(true)}>导入第一批证据</Button></EmptyState>}
-      {!loading && !error && records.length > 0 && <div className="space-y-4">{records.map((record) => <EvidenceCard key={record.evidence_id} record={record} />)}</div>}
+      {!loading && !error && records.filter((record) => record.category === category).length === 0 && <EmptyState title={`还没有${labels[category]}`}><p className="text-sm text-muted">可以先运行一个雷达，或者导入一批真实来源数据。</p><Button className="mt-5" onClick={() => setImportOpen(true)}>导入第一批证据</Button></EmptyState>}
+      {!loading && !error && records.filter((record) => record.category === category).length > 0 && <div className="space-y-4">{records.filter((record) => record.category === category).map((record) => <EvidenceCard key={record.evidence_id} record={record} />)}</div>}
     </>
   );
 }

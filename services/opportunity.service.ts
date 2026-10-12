@@ -19,4 +19,9 @@ export async function actOpportunity(id: string, status: OpportunityStatus): Pro
   await api.opportunities.action(id, action, token);
 }
 
-export async function analyzeOpportunity(id: string) { return mockOpportunities.find((item) => item.id === id); }
+export async function analyzeOpportunity(id: string) {
+  if (useMockMode) return mockOpportunities.find((item) => item.id === id);
+  const token = await getAccessToken();
+  if (!token) return undefined;
+  return toOpportunity(await api.opportunities.get(id, token));
+}
