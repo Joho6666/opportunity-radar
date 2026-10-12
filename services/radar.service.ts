@@ -11,14 +11,25 @@ export async function listRadars(): Promise<Radar[]> {
   return (await api.radars.list(token)).map(toRadar);
 }
 
-export async function createRadar(input: { goal: string; keywords?: string[]; locations?: string[]; minimumBudget?: number }): Promise<Radar> {
+export async function createRadar(input: { name: string; goal: string; description?: string; keywords?: string[]; locations?: string[]; minimumBudget?: number; frequency?: string; freshnessHours?: number; sources?: string[]; listenerDescription?: string }): Promise<Radar> {
   if (useMockMode) {
     const id = `radar-${Date.now()}`;
-    return { id, name: "兼职客户雷达", description: input.goal, status: "active", goal: input.goal, keywords: input.keywords ?? ["PPT", "AI 自动化", "小程序"], locations: input.locations ?? ["桂林", "线上"], minimumBudget: input.minimumBudget ?? 200, frequency: "每天", sources: ["web", "forum"], lastRunAt: "刚刚", nextRunAt: "明天 09:00", stats: { scanned: 0, found: 0, matched: 0, recommended: 0 } };
+    return { id, name: input.name, description: input.description ?? input.goal, status: "active", goal: input.goal, keywords: input.keywords ?? [], locations: input.locations ?? [], minimumBudget: input.minimumBudget ?? 0, frequency: input.frequency ?? "manual", sources: (input.sources ?? ["web"]) as Radar["sources"], lastRunAt: "从未运行", nextRunAt: "手动运行", stats: { scanned: 0, found: 0, matched: 0, recommended: 0 } };
   }
   const token = await getAccessToken();
   if (!token) throw new Error("尚未登录");
-  return toRadar(await api.radars.create({ name: "兼职客户雷达", goal: input.goal, description: input.goal, keywords: input.keywords ?? [], locations: input.locations ?? [], minimum_budget: input.minimumBudget ?? 0, frequency: "daily" }, token));
+  return toRadar(await api.radars.create({
+    name: input.name,
+    goal: input.goal,
+    description: input.description ?? input.goal,
+    keywords: input.keywords ?? [],
+    locations: input.locations ?? [],
+    minimum_budget: input.minimumBudget ?? 0,
+    frequency: input.frequency ?? "manual",
+    freshness_hours: input.freshnessHours ?? 72,
+    sources: input.sources ?? ["github"],
+    listener_description: input.listenerDescription ?? input.goal,
+  }, token));
 }
 
 export async function runRadar(id: string): Promise<void> {
