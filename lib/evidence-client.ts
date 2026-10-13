@@ -1,6 +1,6 @@
 import { getAccessToken } from "@/lib/auth";
 
-export const EVIDENCE_CATEGORIES = ["buyer", "content", "market"] as const;
+export const EVIDENCE_CATEGORIES = ["buyer", "seller", "job", "content", "market"] as const;
 export type EvidenceCategory = (typeof EVIDENCE_CATEGORIES)[number];
 
 export type EvidenceRecord = {
@@ -67,11 +67,12 @@ export const FEED_PRESETS = [
   { label: "V2EX 远程", url: "https://www.v2ex.com/feed/remote.xml" },
 ] as const;
 export type EvidenceRuntime = {
+  paid_api_enabled?: boolean;
   storage_mode: "memory" | "postgres";
   warning: string | null;
   sources: Record<EvidenceSource, { configured: boolean }>;
 };
-export type EvidenceCollectResult = EvidenceBatchResult & { fetched: number; rejected: number; warning: string | null };
+export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; fetched: number; rejected: number; warning: string | null };
 
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8011";
 
@@ -133,11 +134,11 @@ export async function fetchEvidenceRuntime(): Promise<EvidenceRuntime> {
   return request<EvidenceRuntime>("/api/intelligence/evidence/runtime");
 }
 
-export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean): Promise<EvidenceCollectResult> {
+export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean, cursor?: string): Promise<EvidenceCollectResult> {
   const params = new URLSearchParams({ source, query });
   return request<EvidenceCollectResult>(`/api/intelligence/evidence/collect?${params.toString()}`, {
     method: "POST",
-    body: JSON.stringify({ manual_confirmed: manualConfirmed }),
+    body: JSON.stringify({ manual_confirmed: manualConfirmed, ...(cursor ? {cursor} : {}) }),
   });
 }
 

@@ -6,6 +6,8 @@ export type SortMode = "grade" | "latest";
 
 export const CATEGORY_LABELS: Record<EvidenceCategory, string> = {
   buyer: "潜在购买需求",
+  seller: "服务商广告",
+  job: "招聘与求职",
   content: "内容问题",
   market: "市场变化",
 };

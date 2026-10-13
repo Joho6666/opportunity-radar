@@ -1,4 +1,5 @@
 "use client";
+import { BillingPanel } from "@/components/billing-panel";
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -47,8 +48,10 @@ import {
 
 const descriptions: Record<EvidenceCategory, string> = {
   buyer: "有人想找人、给预算或要交付，值得优先看。",
+  seller: "服务商推广与广告，不作为客户需求。",
+  job: "招聘与求职信息，独立于项目客户。",
   content: "受众在提问或求教程，适合做内容。",
-  market: "案例、趋势、卖方自荐，了解行情用。",
+  market: "案例与趋势，了解行情用。",
 };
 
 const GRADE_TONE = {
@@ -194,6 +197,7 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
               <button type="button" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(record.url).then(() => setCopied(true)); setTimeout(() => setCopied(false), 1500); }} className="text-muted hover:text-mist">{copied ? "已复制" : "复制链接"}</button>
             </span>
           </div>
+          {record.metadata?.needs_review === "true" && <p className="mt-2 text-xs text-amber-200">存在分类冲突或原文更新，请重新核实；最新规则分类：{String(record.metadata.latest_predicted_category ?? record.category)}</p>}
           <p className={cn("mt-2 whitespace-pre-line text-[15px] leading-7 text-slate-100", !selected ? "line-clamp-2" : !expanded && "line-clamp-6")}>{record.raw_text}</p>
           {selected && long && <button type="button" onClick={(event) => { event.stopPropagation(); setExpanded((value) => !value); }} className="mt-1 text-xs text-indigo-200 hover:text-white">{expanded ? "收起" : "展开全文"}</button>}
           {(record.payment_signal || urgency || engagement) && (
@@ -254,6 +258,7 @@ function EvidenceInbox() {
   const [query, setQuery] = useState("");
   const [manualConfirmed, setManualConfirmed] = useState(false);
   const [collecting, setCollecting] = useState(false);
+  const [nextPage, setNextPage] = useState<{source: EvidenceSource; query: string; cursor: string} | null>(null);
   const [collectState, setCollectState] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -387,7 +392,7 @@ function EvidenceInbox() {
       else if (key === "u") void review(selected, { verification_status: "unverified" });
       else if (key === "o") window.open(selected.url, "_blank", "noreferrer");
       else if (key === "c" && selected.category === "buyer" && !selected.converted_opportunity_id) void startConvert(selected);
-      else if (["1", "2", "3"].includes(key)) {
+      else if (["1", "2", "3", "4", "5"].includes(key)) {
         const target = EVIDENCE_CATEGORIES[Number(key) - 1];
         if (target !== selected.category) void review(selected, { category: target });
       } else return;
@@ -397,12 +402,14 @@ function EvidenceInbox() {
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, selected, selectedId, convertingId, review, startConvert]);
 
-  async function collect() {
+  async function collect(cursor?: string) {
     if (!query.trim()) { setCollectState("请先填写搜索词"); return; }
     setCollecting(true);
     setCollectState(null);
     try {
-      const result = await collectEvidence(source, query.trim(), manualConfirmed);
+      const result = await collectEvidence(source, query.trim(), manualConfirmed, cursor);
+      setNextPage(result.next_cursor ? {source,query:query.trim(),cursor:result.next_cursor} : null);
+      setManualConfirmed(false);
       setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，拒绝 ${result.rejected} 条`);
       await load();
     } catch (reason) {
@@ -449,11 +456,12 @@ function EvidenceInbox() {
         </div>}
       />
 
+      <BillingPanel />
       {runtime?.warning && <p className="mb-4 rounded-md border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">{runtime.warning}</p>}
 
       {collectorOpen && <Panel className="mb-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-medium text-mist">手动采集 <span className="ml-1 text-xs font-normal text-muted">只搜一次，不自动翻页；原文保留并去重</span></p>
+          <p className="text-sm font-medium text-mist">手动采集 <span className="ml-1 text-xs font-normal text-muted">每次只取一页；下一页需要再次确认</span></p>
           <button className="text-muted hover:text-mist" onClick={() => setCollectorOpen(false)} aria-label="收起采集"><ChevronDown size={18} /></button>
         </div>
         <form className="mt-3 grid gap-2 md:grid-cols-[160px_1fr_auto]" onSubmit={(event) => { event.preventDefault(); void collect(); }}>
@@ -461,10 +469,11 @@ function EvidenceInbox() {
             {EVIDENCE_SOURCES.map((item) => <option key={item} value={item} disabled={runtime ? !runtime.sources[item]?.configured : false}>{SOURCE_LABELS[item]}{BILLABLE_SOURCES.has(item) ? " · 收费" : ""}{runtime && !runtime.sources[item]?.configured ? "（未配置）" : ""}</option>)}
           </select>
           <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} placeholder={source === "rss" ? "RSS 地址，或点下面的预设" : "搜索词，回车开始；问句更容易搜到买家，如「有人接剪辑吗」"} aria-label="搜索词" className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-ai" />
-          <Button type="submit" disabled={collecting || !runtime?.sources[source]?.configured || (billable && !manualConfirmed)}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
+          <Button type="submit" disabled={collecting || !runtime?.sources[source]?.configured || (billable && (!manualConfirmed || !runtime?.paid_api_enabled))}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
         </form>
         {source === "rss" && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">免费预设：{FEED_PRESETS.map((preset) => <button key={preset.url} type="button" onClick={() => setQuery(preset.url)} className={cn("rounded border px-2 py-0.5 transition", query === preset.url ? "border-ai/60 text-indigo-100" : "border-line hover:text-mist")}>{preset.label}</button>)}</div>}
         {billable && <label className="mt-2 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />该来源按调用收费，我确认本次采集</label>}
+        {nextPage && nextPage.source === source && nextPage.query === query.trim() && <Button className="mt-3" variant="secondary" disabled={collecting || (billable && (!manualConfirmed || !runtime?.paid_api_enabled))} onClick={() => void collect(nextPage.cursor)}>采集下一页（独立请求）</Button>}
         {collectState && <p className="mt-2 text-sm text-muted">{collectState}</p>}
       </Panel>}
 
@@ -515,7 +524,7 @@ function EvidenceInbox() {
         {sources.map((item) => <button key={item.key} onClick={() => setSourceFilter(sourceFilter === item.key ? null : item.key)} aria-pressed={sourceFilter === item.key} className={cn("rounded-full border px-2.5 py-0.5 transition", sourceFilter === item.key ? item.tone : "border-line text-muted hover:text-mist")}>{item.label} <span className="mono opacity-70">{item.count}</span></button>)}
       </div>}
       <p className="mb-3 hidden flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted sm:flex">
-        <span><Kbd>J</Kbd> <Kbd>K</Kbd> 上下</span><span><Kbd>V</Kbd> 核实</span><span><Kbd>X</Kbd> 排除</span><span><Kbd>U</Kbd> 退回</span><span><Kbd>C</Kbd> 转为机会</span><span><Kbd>O</Kbd> 原文</span><span><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd> 改分类</span>
+        <span><Kbd>J</Kbd> <Kbd>K</Kbd> 上下</span><span><Kbd>V</Kbd> 核实</span><span><Kbd>X</Kbd> 排除</span><span><Kbd>U</Kbd> 退回</span><span><Kbd>C</Kbd> 转为机会</span><span><Kbd>O</Kbd> 原文</span><span><Kbd>1</Kbd>–<Kbd>5</Kbd> 改分类</span>
       </p>
 
       {loading && <Panel className="flex items-center justify-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18} /> 正在加载证据…</Panel>}

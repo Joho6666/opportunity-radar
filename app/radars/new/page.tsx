@@ -7,7 +7,8 @@ import { Button, PageHeader, Panel } from "@/components/ui";
 import { createRadar } from "@/services/radar.service";
 import { useOpportunityStore } from "@/stores/use-opportunity-store";
 
-const sources = [["github", "GitHub"], ["hackernews", "Hacker News"], ["rss", "RSS"], ["tikhub", "TikHub / TikTok"], ["web_search", "Web Search"]] as const;
+import { EVIDENCE_SOURCES, SOURCE_LABELS } from "@/lib/evidence-client";
+const sources = EVIDENCE_SOURCES.map(value => [value, SOURCE_LABELS[value]] as const);
 
 export default function NewRadar() {
   const router = useRouter();
@@ -43,7 +44,7 @@ export default function NewRadar() {
         <label className="text-sm"><span className="mb-1 block text-muted">最低预算（元）</span><input type="number" min="0" value={budget} onChange={(e) => setBudget(e.target.value)} className="w-full rounded border border-line bg-ink px-3 py-2" /></label>
         <label className="text-sm"><span className="mb-1 block text-muted">信息新鲜度（小时）</span><input type="number" min="1" max="720" value={freshness} onChange={(e) => setFreshness(e.target.value)} className="w-full rounded border border-line bg-ink px-3 py-2" /></label>
       </div>
-      <div className="mt-5 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">TikHub / TikTok 和 Web Search 可能产生费用。当前页面只保存配置，不会自动触发付费采集。</div>
+      <div className="mt-5 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">TikHub（含国内平台）和 Web Search 可能产生费用。付费默认禁用；手动与定时运行均需要服务端授权和额度。</div>
       {error && <p className="mt-4 rounded border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-200">{error}</p>}
       <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => router.back()}>取消</Button><Button onClick={() => void submit()} disabled={loading || name.trim().length < 1 || goal.trim().length < 10}>{loading ? "保存中…" : "保存雷达"}</Button></div>
     </Panel>
