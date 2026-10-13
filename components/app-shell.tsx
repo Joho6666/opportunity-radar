@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useOpportunityStore } from "@/stores/use-opportunity-store";
+import { Button } from "@/components/ui";
 
 const nav = [
   ["首页", "/dashboard"],
@@ -30,7 +31,9 @@ function Navigation({ onSelect }: { onSelect?: () => void }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const path = usePathname();
-  useEffect(() => { void useOpportunityStore.getState().hydrate(); }, []);
+  const error = useOpportunityStore((state) => state.error);
+  const loading = useOpportunityStore((state) => state.loading);
+  useEffect(() => { void useOpportunityStore.getState().hydrate().catch(() => undefined); }, []);
   return <div className="min-h-screen bg-ink">
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line bg-[#061728] p-4 lg:block">
       <Link href="/dashboard" className="mb-8 flex items-center gap-2 text-sm font-semibold text-white"><span className="grid h-8 w-8 place-items-center rounded-lg bg-ai shadow-glow"><Radar size={17}/></span><span>机会雷达 <small className="block font-normal text-muted">Opportunity Radar</small></span></Link>
@@ -44,6 +47,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-300 sm:flex"><Database size={12}/> 本地模式</span><span className="grid h-8 w-8 place-items-center rounded-full bg-panel text-xs text-mist">小何</span></div>
     </header>
     {open && <div className="fixed inset-0 z-50 lg:hidden"><button className="absolute inset-0 bg-black/60" aria-label="关闭导航" onClick={() => setOpen(false)}/><aside className="relative h-full w-72 border-r border-line bg-[#061728] p-5"><div className="mb-8 flex items-center gap-2 font-semibold"><Radar className="text-indigo-300"/>机会雷达</div><Navigation onSelect={() => setOpen(false)}/></aside></div>}
-    <main className="min-h-[calc(100vh-64px)] p-4 sm:p-6 lg:ml-60 lg:p-8">{children}</main>
+    <main className="min-h-[calc(100vh-64px)] p-4 sm:p-6 lg:ml-60 lg:p-8">
+      {error && <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+        <span>数据加载或保存失败：{error}</span>
+        <Button variant="secondary" disabled={loading} onClick={() => { void useOpportunityStore.getState().retry().catch(() => undefined); }}>{loading ? "重试中…" : "重新加载数据"}</Button>
+      </div>}
+      {children}
+    </main>
   </div>;
 }

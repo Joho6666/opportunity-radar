@@ -11,7 +11,7 @@ import { useOpportunityStore } from "@/stores/use-opportunity-store";
 export default function Settings() {
   const reset = useOpportunityStore((state) => state.reset);
   const [notice, setNotice] = useState("");
-  const localAuthDisabled = process.env.NEXT_PUBLIC_AUTH_DISABLED === "true";
+  const localAuthDisabled = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_AUTH_DISABLED === "true";
   const mode = useMockMode ? "演示模式：不会产生真实采集" : "真实数据模式：连接本地 API";
   return <AppShell>
     <PageHeader title="设置" description="只展示当前真正生效的配置，不用虚假数据填充页面。" />

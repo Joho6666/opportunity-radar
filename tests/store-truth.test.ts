@@ -37,13 +37,26 @@ it("restoring an older stored state never brings back hydrated/loading/error in 
   expect(service.list).toHaveBeenCalledTimes(1);
   expect(store.getState().opportunities).toEqual(mockOpportunities);
 });
-it("never writes runtime flags to storage in API mode; demo mode keeps hydrated", () => {
+it("only persists local skill preferences in API mode; demo mode keeps its records", () => {
   const state = { opportunities: mockOpportunities, hydrated: true, loading: true, error: "x" };
   const api = persistable(state, false);
-  expect(api.opportunities).toEqual(mockOpportunities);
+  expect(api).not.toHaveProperty("opportunities");
+  expect(persistable({ profile: mockProfile, radars: mockRadars, skills: [] }, false)).toEqual({ skills: [] });
   expect(api).not.toHaveProperty("hydrated");
   expect(api).not.toHaveProperty("loading");
   expect(api).not.toHaveProperty("error");
   expect(persistable(state, true)).toMatchObject({ hydrated: true });
   expect(persistable(state, true)).not.toHaveProperty("loading");
+});
+
+it("does not expose demo or another user's cached records when API hydration fails", async () => {
+  const legacy = { opportunities: mockOpportunities, radars: mockRadars, profile: mockProfile, hydrated: true };
+  store.setState(mergePersisted(legacy, store.getState(), false));
+  service.list.mockRejectedValue(new Error("API unavailable"));
+  await expect(store.getState().hydrate()).rejects.toThrow("API unavailable");
+  expect(store.getState().opportunities).toEqual([]);
+  expect(store.getState().radars).toEqual([]);
+  expect(store.getState().profile.name).toBe("");
+  expect(store.getState().hydrated).toBe(false);
+  expect(store.getState().error).toBe("API unavailable");
 });

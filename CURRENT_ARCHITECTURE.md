@@ -38,6 +38,7 @@ flowchart TB
 
 - 保留现有 Next.js/FastAPI、Signal/Cluster/Trend/MoneyScore/Information Edge 与简报模块；没有另建 CRM。
 - PostgreSQL 是实际模式的存储。内存只适用于显式开发/测试，生产启动拒绝内存、Mock、免登录和 fake-IP DNS。前端 Mock 也必须显式开启，生产保护页仍需登录。
+- 前端生产忽略 Mock 和免登录开关，使用正式会话 token。API 模式不从共享浏览器缓存恢复机会、雷达或画像，只保留本机技能偏好；旧演示/其他用户缓存不能在 API 失败时成为业务数据。全局数据错误显示重试入口，初始化错误不成为未处理异常。
 - 计费由数据库账户锁串行检查并原子预留。未配置价格、授权、持久化上下文或定时授权则拒绝。失败不释放额度；付费传输与 Worker 不自动重试。真实费用未知保留 null，预留上限不冒充账单。
 - 迁移账本逐文件检查 SHA256，只执行新增迁移。历史文件不改写；已有无账本数据库拒绝自动接管。
 - AUTH_DISABLED 后端仅开发直连 loopback，拒绝所有转发头；Docker 和公网反向代理使用 JWT。本机开发 Next 必须绑定 loopback，其开发 UI 入口不替代 API 身份检查。
