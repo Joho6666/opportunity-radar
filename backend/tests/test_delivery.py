@@ -1,3 +1,4 @@
+from uuid import uuid4
 import asyncio
 from jose import jwt
 from fastapi.testclient import TestClient
@@ -22,7 +23,7 @@ def run_once(repo: MemoryRepository, user_id: str, radar_id: str):
 
 def test_reruns_do_not_duplicate_opportunities():
     repo, user_id = make_repo()
-    radar = repo.create_radar(user_id, RadarCreate(name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
     run_once(repo, user_id, radar.id); first = len(repo.list_opportunities(user_id))
     second = run_once(repo, user_id, radar.id)
     assert first > 0
@@ -33,7 +34,7 @@ def test_reruns_do_not_duplicate_opportunities():
 
 def test_radar_stats_and_schedule_are_updated_after_run():
     repo, user_id = make_repo()
-    radar = repo.create_radar(user_id, RadarCreate(name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
     run_once(repo, user_id, radar.id)
     saved = repo.get_radar(user_id, radar.id)
     assert saved.stats.items_found > 0
@@ -43,7 +44,7 @@ def test_radar_stats_and_schedule_are_updated_after_run():
 
 def test_delete_radar_cleans_runs_and_opportunities():
     repo, user_id = make_repo()
-    radar = repo.create_radar(user_id, RadarCreate(name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
     run_once(repo, user_id, radar.id)
     assert repo.list_opportunities(user_id)
     repo.delete_radar(user_id, radar.id)
@@ -53,24 +54,25 @@ def test_delete_radar_cleans_runs_and_opportunities():
 
 def test_won_revenue_uses_actual_revenue_over_budget():
     repo, user_id = make_repo()
-    radar = repo.create_radar(user_id, RadarCreate(name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
     run_once(repo, user_id, radar.id)
     item = repo.list_opportunities(user_id)[0]
     repo.save_opportunity(item.model_copy(update={"status": "won"}))
-    assert repo.won_revenue(user_id) == item.budget_max
+    assert repo.won_revenue(user_id) == 0
     from app.schemas.domain import OpportunityAction
     repo.record_action(item.id, OpportunityAction(actual_revenue=123))
     assert repo.won_revenue(user_id) == 123
 
 
 def test_api_pipeline_summary_reports_income():
-    token = jwt.encode({"sub": "pipeline-user", "aud": "authenticated"}, "", algorithm="HS256")
+    token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated"}, "offline-test-jwt-secret-not-for-deployment", algorithm="HS256")
     headers = {"Authorization": f"Bearer {token}"}
     with TestClient(app) as client:
         client.put("/api/profile", headers=headers, json={"display_name": "测试", "skills": [{"name": "PPT", "level": "strong"}], "goals": ["client"]})
-        radar = client.post("/api/radars", headers=headers, json={"name": "雷达", "goal": "寻找桂林 PPT 有偿需求", "keywords": ["PPT"], "locations": ["桂林"]}).json()
+        radar = client.post("/api/radars", headers=headers, json={"sources":["mock"],"name": "雷达", "goal": "寻找桂林 PPT 有偿需求", "keywords": ["PPT"], "locations": ["桂林"]}).json()
         assert client.post(f"/api/radars/{radar['id']}/run", headers=headers).status_code == 202
         opportunities = client.get("/api/opportunities", headers=headers).json()
+        client.patch(f"/api/intelligence/evidence/{opportunities[0]['evidence_id']}/review",headers=headers,json={"verification_status":"verified","notes":"人工核实原帖"})
         won = client.post(f"/api/opportunities/{opportunities[0]['id']}/win", headers=headers, json={"actual_revenue": 250}).json()
         assert won["status"] == "won"
         summary = client.get("/api/pipeline/summary", headers=headers).json()

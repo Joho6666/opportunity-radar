@@ -111,6 +111,7 @@ def test_collect_drops_stale_posts_and_requires_confirmation_for_domestic_source
         RawItem(external_id="undated", title="t", content="没有发布时间的帖子也保留", url="https://example.test/undated", source="douyin", platform="douyin"),
     ]
     repository, fake_search = _setup(monkeypatch, items, tikhub_key="k")
+    monkeypatch.setattr(get_settings(),"paid_api_enabled",True)  # mock search only; no transport
     client = TestClient(app)
     try:
         refused = client.post("/api/intelligence/evidence/collect?source=douyin&query=剪辑", json={"manual_confirmed": False})

@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: opportunity_radar
-    ports: ["127.0.0.1:54329:5432"]
+    ports: ["127.0.0.1:${PG_PORT:-54329}:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init:/docker-entrypoint-initdb.d:ro
@@ -14,21 +14,19 @@ services:
       timeout: 3s
       retries: 20
   migrate:
-    image: pgvector/pgvector:pg16
+    build: ./backend
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opportunity_radar
+      MIGRATIONS_DIR: /migrations
     volumes: ["./supabase/migrations:/migrations:ro"]
-    entrypoint: >
-      sh -c 'for f in /migrations/*.sql; do
-        echo "applying $$f";
-        PGPASSWORD=postgres psql -h postgres -U postgres -d opportunity_radar -v ON_ERROR_STOP=1 -f "$$f" || exit 1;
-      done;
-      echo "migrations applied"'
+    command: python -m app.database.migrate
     restart: "no"
   backend:
     build: ./backend
-    ports: ["8011:8011"]
+    ports: ["127.0.0.1:${API_PORT:-8011}:8011"]
     env_file: ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379
@@ -37,11 +35,11 @@ services:
       INCLUDE_MOCK_COLLECTOR: "false"
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/ready', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -56,7 +54,7 @@ services:
     command: arq app.workers.settings.WorkerSettings
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
   scheduler:
@@ -70,11 +68,19 @@ services:
     command: python -m app.workers.scheduler
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    command: redis-server --appendonly yes
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports: ["127.0.0.1:${REDIS_PORT:-6379}:6379"]
 volumes:
   pgdata:
+  redisdata:

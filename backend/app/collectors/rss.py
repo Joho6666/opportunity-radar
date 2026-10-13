@@ -27,7 +27,7 @@ class RssCollector(SourceAdapter):
                 validate_public_url(feed_url)
                 response = await fetcher.request("GET", feed_url)
             except AppError:
-                continue
+                raise
             parsed = feedparser.parse(response.text) if feedparser else {"entries": []}
             for entry in parsed.get("entries", [])[:10]:
                 url = entry.get("link") or feed_url
@@ -47,7 +47,7 @@ class RssCollector(SourceAdapter):
                         updated_at_source=_updated(entry),
                         platform="rss",
                         engagement={},
-                        metadata={"feed": feed_url, "query": query},
+                        metadata={"feed": feed_url, "query": query,"content_kind":"article"},
                     )
                 )
         return items

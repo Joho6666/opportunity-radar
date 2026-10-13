@@ -74,3 +74,14 @@ async def resume(radar_id: str, user: CurrentUser = Depends(get_current_user), r
 @router.get("/runs/{run_id}", response_model=RadarRunRead)
 async def get_run(run_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     return repo.get_run(user.id, run_id)
+
+
+from pydantic import BaseModel,Field
+
+class RunRecovery(BaseModel):
+    reason: str = Field(min_length=10,max_length=500)
+
+@router.post("/runs/{run_id}/recover",response_model=RadarRunRead)
+async def recover_run(run_id:str,payload:RunRecovery,user:CurrentUser=Depends(get_current_user),repo:Repository=Depends(get_repository)):
+    """Mark a stale run failed and pause its Radar; never retry paid calls automatically."""
+    return repo.recover_run(user.id,run_id,payload.reason)

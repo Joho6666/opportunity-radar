@@ -8,7 +8,7 @@ async def run_radar_job(ctx, user_id: str, radar_id: str, run_id: str):
 
 class WorkerSettings:
     functions = [run_radar_job]
-    max_tries = 3
+    max_tries = 1
     job_timeout = 600
-    retry_jobs = True
+    retry_jobs = False
     redis_settings = redis_settings()

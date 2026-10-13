@@ -18,7 +18,7 @@ class Classification:
 # "DM for collab") and people looking for work are sellers, not buyers.
 _SELLER = re.compile(
     r"商务合作|合作.{0,4}(私信|联系|vx|微信)|接(广告|推广|单|外包|私活|代剪)|个人承接|承接|品牌推广|欢迎咨询|招(代理|商)|专业代做"
-    r"|一对一定制|专业团队|我们团队|我司|求(职|兼职)|找(兼职|工作)|出售一下自己|自荐|可接单"
+    r"|一对一定制|专业团队|我们团队|求(职|兼职)|找(兼职|工作)|出售一下自己|自荐|可接单"
     r"|本人.{0,12}(经验|程序员|开发|设计)|最近在接|也能安排|优惠价格|\d+(\.\d+)?\s*元起|我是.{0,20}(公司|工作室)|一家.{0,8}(公司|工作室)|全流程我一个人|做软件\s*\d+\s*年"
     r"|\bdm (me )?for collab|\bcollab\b|link in bio|available for hire|open for commissions|book a call|use code|i'?m a freelancer",
     re.I,
@@ -32,14 +32,14 @@ _ASK = re.compile(
 )
 # A request or a job opening, said either way.
 _DEMAND = re.compile(
-    r"找人|寻找|找个|找一[个位]|求推荐|求购|求助|预算|询价|外包|采购|定制|有偿|悬赏|需要.{0,10}(做|帮)"
+    r"找人|寻找|找个|找一[个位]|求推荐|求购|求助|预算|询价|外包|采购|定制|有偿|悬赏|需要.{0,10}(制作|开发|设计|剪辑|排版|做|帮)"
     r"|招聘|诚招|急招|招募|招(一|个|人|兼职|写手|设计|开发|工程师|助理|主播|剪辑|实习)"
     r"|\bhiring\b|\bseeking\b|\|\s*(remote|onsite|on-site|hybrid)\b",
     re.I,
 )
 # Demand strong enough to count as buyer intent without money or urgency.
 _STRONG_DEMAND = re.compile(
-    r"找人|找个|找一[个位]|求推荐|外包|定制|求购|有偿|悬赏|招聘|诚招|急招|招募|招(一|个|兼职|写手|设计|开发|工程师|实习)"
+    r"需要.{0,8}(制作|开发|设计|剪辑|排版)|找人|找个|找一[个位]|求推荐|外包|定制|求购|有偿|悬赏|招聘|诚招|急招|招募|招(一|个|兼职|写手|设计|开发|工程师|实习)"
     r"|\bhiring\b|\|\s*(remote|onsite|on-site|hybrid)\b",
     re.I,
 )
@@ -60,8 +60,12 @@ _HASHTAG = re.compile(r"#[^#\s]{1,30}#?")
 # A post that labels itself ("[接单] 全栈开发", "【求职】") is a seller whatever else the title says.
 _SELLER_TAG = re.compile(r"^\s*[\[【(（]\s*(接单|承接|自荐|求职|出售)\s*[\]】)）]")
 
-_SELLER_RESULT = Classification(category="market", reason_code="seller_self_promotion", confidence=0.6, evidence_grade="C")
+_SELLER_RESULT = Classification(category="seller", reason_code="seller_self_promotion", confidence=0.6, evidence_grade="C")
 _ADVICE_RESULT = Classification(category="content", reason_code="advice_or_listicle", confidence=0.66, evidence_grade="B")
+
+
+_JOB = re.compile(r"招聘|全职|实习|岗位|求职|找工作|月薪|薪资|工资|\bfull[- ]?time\b|\bsalary\b|\bintern(ship)?\b|\bjob (opening|seeker)\b|\bhiring\b", re.I)
+_PROJECT = re.compile(r"外包|项目制|付费项目|contract project|project[- ]based|freelance project", re.I)
 
 
 def classify_tiktok(raw_text: str, *, title: str | None = None, engagement: dict | None = None) -> Classification:
@@ -71,6 +75,8 @@ def classify_tiktok(raw_text: str, *, title: str | None = None, engagement: dict
     even if its body mentions 预算). Hashtags are ignored, and demand words inside a seller phrase
     ("接外包") do not count as demand.
     """
+    if _JOB.search(f"{title or ''} {raw_text}") and not _PROJECT.search(f"{title or ''} {raw_text}"):
+        return Classification("job", "employment_or_job_seeker", .9, "B")
     head = _HASHTAG.sub(" ", (title or "")).strip()
     body = _HASHTAG.sub(" ", raw_text).strip()
     if head and _SELLER_TAG.search(head):
@@ -81,6 +87,8 @@ def classify_tiktok(raw_text: str, *, title: str | None = None, engagement: dict
     if _TEACH.search(full):
         return Classification(category="content", reason_code="audience_question_or_howto", confidence=0.72, evidence_grade="B")
     ask = _ASK.search(full)
+    if not ask and re.search(r"我们团队(提供|承接)|专业团队|个人承接|专业代做|\bwe (offer|provide)\b", full, re.I):
+        return _SELLER_RESULT
     if _ADVICE.search(full) and not ask:
         return _ADVICE_RESULT
     without_seller = _SELLER.sub(" ", full)

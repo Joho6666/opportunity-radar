@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 from ..core.errors import AppError
 from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem
@@ -25,7 +25,10 @@ class MemoryRepository:
         self.opportunities: dict[str, OpportunityRead] = {}
         self.runs: dict[str, RadarRunRead] = {}
         self.actions: dict[str, OpportunityAction] = {}
+        self.evidence_revisions = []
+        self.evidence_reviews = []
         self.action_log: list[tuple[str, str, OpportunityAction]] = []
+        self.collection_receipts = {}
         self.llm_calls: list[dict] = []
         self.events: list[dict] = []
         self.preferences: dict[str, PreferenceState] = {}
@@ -136,9 +139,26 @@ class MemoryRepository:
         return self._raw_items.get(hash_url(url))
 
     def create_run(self, radar_id: str) -> RadarRunRead:
-        run = RadarRunRead(id=str(uuid4()), radar_id=radar_id, status="queued", stats=RadarRunStats())
+        run = RadarRunRead(id=str(uuid4()), radar_id=radar_id, status="queued", stats=RadarRunStats(), stage_stats={"created_at":datetime.now(UTC).isoformat()})
         self.runs[run.id] = run
         return run
+
+    def claim_run(self, user_id, run_id):
+        run=self.get_run(user_id,run_id)
+        if run.status != "queued":
+            return None
+        return self.save_run(run.model_copy(update={"status":"running"}))
+
+    def recover_run(self, user_id, run_id, reason):
+        from datetime import timedelta
+        run=self.get_run(user_id,run_id)
+        if run.status not in {"queued","running"}:
+            return run
+        started=datetime.fromisoformat(run.stage_stats.get("created_at",datetime.now(UTC).isoformat()))
+        if datetime.now(UTC)-started < timedelta(minutes=15):
+            raise AppError("RUN_STILL_ACTIVE","运行未超过15分钟，请等待。",409)
+        self.radars[run.radar_id]=self.radars[run.radar_id].model_copy(update={"status":"paused"})
+        return self.save_run(run.model_copy(update={"status":"failed","error_code":"MANUAL_RECOVERY","error_message":reason}))
 
     def save_run(self, run: RadarRunRead) -> RadarRunRead:
         self.runs[run.id] = run
@@ -156,6 +176,10 @@ class MemoryRepository:
         return [run for run in self.runs.values() if run.radar_id in ids]
 
     def add_opportunity(self, item: OpportunityRead, user_id: str | None = None) -> OpportunityRead:
+        if item.evidence_id:
+            for existing in self.list_opportunities(user_id or self.radars[item.radar_id].user_id):
+                if existing.evidence_id == item.evidence_id:
+                    return existing
         self.opportunities[item.id] = item
         return item
 
@@ -174,9 +198,35 @@ class MemoryRepository:
         return item
 
     def record_action(self, opportunity_id: str, payload: OpportunityAction, action: str | None = None) -> OpportunityAction:
+        previous = self.actions.get(opportunity_id, OpportunityAction())
+        payload = previous.model_copy(update=payload.model_dump(exclude_none=True))
         self.actions[opportunity_id] = payload
+        if opportunity_id in self.opportunities:
+            self.opportunities[opportunity_id] = self.opportunities[opportunity_id].model_copy(update=payload.model_dump(exclude_none=True))
         self.action_log.append((opportunity_id, action or "updated", payload))
         return payload
+
+    def update_pipeline(self, user_id, opportunity_id, patch):
+        from ..services.acquisition_service import apply_pipeline
+        item=self.get_opportunity(user_id,opportunity_id)
+        evidence=self.get_evidence(user_id,item.evidence_id) if item.evidence_id else None
+        updated=apply_pipeline(item,patch,evidence)
+        if updated == item:
+            return item
+        self.opportunities[item.id]=updated
+        self.action_log.append((item.id,updated.status,patch))
+        return updated
+
+    def record_collection(self,user_id,receipt_id,source,fetched,effective,duplicates=0,stale=0):
+        from datetime import UTC
+        self.collection_receipts.setdefault(receipt_id,dict(user_id=user_id,source=source,fetched=fetched,effective=effective,duplicates=duplicates,stale=stale,created_at=datetime.now(UTC)))
+        if self.collection_receipts[receipt_id]["user_id"] == user_id:
+            self.collection_receipts[receipt_id].update(effective=effective,duplicates=duplicates,stale=stale)
+
+    def collection_counts(self,user_id):
+        from datetime import UTC
+        rows=[r for r in self.collection_receipts.values() if r["user_id"] == user_id]
+        return {"collected":sum(r["fetched"] for r in rows),"today":sum(r["fetched"] for r in rows if r["created_at"].date() == datetime.now(UTC).date())}
 
     def scanned_count(self, user_id: str) -> int:
         return sum(run.stats.items_found for run in self.runs_of_user(user_id))
@@ -189,7 +239,7 @@ class MemoryRepository:
             if recorded and recorded.actual_revenue is not None:
                 total += recorded.actual_revenue
             else:
-                total += item.budget_max
+                total += item.actual_revenue or 0
         return total
 
     def daily_brief(self, user_id: str) -> DailyBriefRead:
@@ -197,7 +247,7 @@ class MemoryRepository:
         recommended = [item for item in items if item.recommendation == "强烈推荐"]
         scanned = self.scanned_count(user_id) or len(items)
         low, high = potential_income_range(items)
-        brief = assemble(items, signals=self.signals, clusters=self.clusters, changes=self.change_events)
+        brief = assemble(items, signals=self.list_signals(user_id), clusters=self.list_clusters(user_id), changes=self.list_change_events(user_id))
         brief = brief.model_copy(update={
             "date": date.today(),
             "scanned_count": scanned,
@@ -244,6 +294,14 @@ class MemoryRepository:
             if key not in self.evidence:
                 self.evidence[key] = record
                 inserted += 1
+            elif self.evidence[key].raw_text != record.raw_text:
+                current=self.evidence[key]
+                self.evidence_revisions.append(current)
+                verification="disputed" if current.verification_status == "verified" else current.verification_status
+                self.evidence[key]=current.model_copy(update={"raw_text":record.raw_text,"verification_status":verification,"metadata":{**current.metadata,**record.metadata,"latest_predicted_category":record.category,"needs_review":"true"}})
+                for oid, item in self.opportunities.items():
+                    if item.evidence_id == current.evidence_id and item in self.list_opportunities(user_id):
+                        self.opportunities[oid]=item.model_copy(update={"verification_status":verification})
             stored.append(self.evidence[key])
         return EvidenceUpsertResult(
             batch_id=batch.batch_id,
@@ -276,9 +334,18 @@ class MemoryRepository:
 
     def review_evidence(self, user_id: str, evidence_id: str, review: EvidenceReview) -> EvidenceRecord:
         record = self.get_evidence(user_id, evidence_id)
+        self.evidence_reviews.append({"user_id":user_id,"evidence_id":evidence_id,"previous":record.model_dump(),"correction":review.model_dump(exclude_none=True)})
         updates = review.model_dump(exclude_none=True)
+        metadata = dict(record.metadata)
+        for key in ("title","summary","budget_min","budget_max"):
+            if key in updates: metadata[key] = str(updates.pop(key))
+        updates["metadata"] = metadata
         stored = record.model_copy(update=updates)
         self.evidence[(user_id, record.identity_key)] = stored
+        for key, item in self.opportunities.items():
+            if item.evidence_id == evidence_id and item in self.list_opportunities(user_id):
+                verification = stored.verification_status if stored.category == "buyer" else "disputed"
+                self.opportunities[key] = item.model_copy(update={"verification_status":verification})
         return stored
 
     # ---- Money Intelligence extensions ----

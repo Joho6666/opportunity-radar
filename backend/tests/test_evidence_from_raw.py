@@ -19,7 +19,7 @@ def test_raw_items_keep_platform_and_acquisition_provenance():
     batch = raw_items_to_evidence_batch(source="tikhub", query="AI视频广告", items=[item], batch_id="tikhub-1")
     record = batch.items[0]
     assert record.category == "market"
-    assert record.classification_source == "rule_v1"
+    assert record.classification_source == "rule_v2"
     assert record.classification_reason
     assert record.source_platform == "tiktok"
     assert record.acquisition_tool == "tikhub"
@@ -38,7 +38,7 @@ def test_high_engagement_does_not_create_buyer_signal():
     )
     record = raw_items_to_evidence_batch(source="tikhub", query="AI视频广告", items=[item], batch_id="tikhub-2").items[0]
     assert record.category == "market"
-    assert record.classification_source == "rule_v1"
+    assert record.classification_source == "rule_v2"
 
 
 def test_rule_grade_survives_persistence():
@@ -58,3 +58,12 @@ def test_rule_grade_survives_persistence():
     assert stored["buyer"].evidence_grade == "A"
     assert stored["content"].evidence_grade == "B"
     assert stored["market"].evidence_grade == "C"
+
+
+def test_long_github_issue_preserves_full_source_text():
+    from app.schemas.domain import RawItem
+    from app.services.evidence_from_raw import raw_items_to_evidence_batch
+    body="Need a freelancer to build a website. " + "documented scope. "*3500
+    item=RawItem(external_id="large",source="github",url="https://github.com/example/repo/issues/1",title="Long scope",content=body)
+    batch=raw_items_to_evidence_batch(source="github",query="freelance",items=[item],batch_id="long")
+    assert body.strip() in batch.items[0].raw_text and len(batch.items[0].raw_text)>20000

@@ -40,6 +40,8 @@ def validate_public_url(url: str, resolver=socket.getaddrinfo) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise AppError("BLOCKED_URL", "只允许 http/https 请求。", 400)
+    if parsed.username or parsed.password:
+        raise AppError("BLOCKED_URL", "URL 不允许嵌入凭据。", 400)
     host = (parsed.hostname or "").strip().lower()
     if not host or host in BLOCKED_HOSTS or host.endswith(".local") or host.endswith(".internal"):
         raise AppError("BLOCKED_HOST", "拒绝访问本地或保留主机。", 400)
@@ -53,7 +55,9 @@ def validate_public_url(url: str, resolver=socket.getaddrinfo) -> str:
         answers = resolver(host, None)
     except OSError as exc:
         raise AppError("BLOCKED_HOST", "无法解析该主机。", 400) from exc
-    allow_fake_ip = get_settings().allow_fake_ip_dns
+    allow_fake_ip = get_settings().allow_fake_ip_dns and get_settings().app_env.lower() == "development"
+    if not answers:
+        raise AppError("BLOCKED_HOST", "主机解析为空。", 400)
     for family, _type, _proto, _canon, sockaddr in answers:
         address = sockaddr[0]
         if allow_fake_ip and ipaddress.ip_address(address) in FAKE_IP_NETWORK:
@@ -75,6 +79,8 @@ class HttpFetcher:
         self._last_call: dict[str, float] = {}
 
     async def request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        billable_provider = kwargs.pop("billable_provider", None)
+        billable_source = kwargs.pop("billable_source", billable_provider)
         host = validate_public_url(url)
         headers = {"User-Agent": USER_AGENT, **kwargs.pop("headers", {})}
         timeout = kwargs.pop("timeout", self.timeout)
@@ -84,24 +90,36 @@ class HttpFetcher:
             if wait > 0:
                 await asyncio.sleep(wait)
             last_error: Exception | None = None
-            for attempt in range(self.retries + 1):
+            retries = 0 if billable_provider else self.retries
+            for attempt in range(retries + 1):
                 try:
-                    client = self._client or httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+                    from ..services.billing_gateway import reserve, finish
+                    reservation = reserve(billable_provider, billable_source) if billable_provider else None
+                    from .transport import public_transport
+                    client = self._client or httpx.AsyncClient(timeout=timeout, follow_redirects=False, transport=public_transport(), trust_env=False)
                     close = self._client is None
                     try:
                         response = await client.request(method, url, headers=headers, timeout=timeout, **kwargs)
                     finally:
                         if close:
                             await client.aclose()
+                    if reservation:
+                        try:
+                            reported=response.json()
+                        except ValueError:
+                            reported=None
+                        finish(reservation,reported if isinstance(reported,dict) else None,ok=response.is_success)
                     self._last_call[host] = loop.time()
-                    if response.status_code in {429, 500, 502, 503, 504} and attempt < self.retries:
+                    if response.status_code in {429, 500, 502, 503, 504} and attempt < retries:
                         await asyncio.sleep(0.4 * (attempt + 1))
                         continue
                     response.raise_for_status()
                     return response
                 except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+                    if reservation:
+                        finish(reservation, ok=False)
                     last_error = exc
-                    if attempt >= self.retries:
+                    if attempt >= retries or (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code not in {429, 500, 502, 503, 504}):
                         raise
                     await asyncio.sleep(0.4 * (attempt + 1))
             raise last_error or RuntimeError("request failed")

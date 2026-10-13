@@ -1,7 +1,7 @@
 """Domestic platforms through TikHub's paid API: 小红书, 微博, 知乎, 抖音.
 
-One search call per run (no paging), so each run costs exactly one TikHub request per
-platform. Parsers are pure functions over TikHub's JSON so they can be tested on saved
+Each search_page performs at most one billed request; continuation requires an explicit
+cursor. These shapes are fixture contracts and have not been verified against a live paid endpoint. Parsers are pure functions over TikHub's JSON so they can be tested on saved
 responses without network or cost.
 """
 from __future__ import annotations
@@ -57,7 +57,10 @@ def parse_weibo_time(value: str | None, now: datetime | None = None) -> datetime
         return (now - timedelta(hours=int(m.group(1)))).astimezone(UTC)
     if m := re.fullmatch(r"(今天|昨天)\s*(\d{1,2}):(\d{2})", text):
         day = now - timedelta(days=1 if m.group(1) == "昨天" else 0)
-        return day.replace(hour=int(m.group(2)), minute=int(m.group(3)), second=0, microsecond=0).astimezone(UTC)
+        try:
+            return day.replace(hour=int(m.group(2)), minute=int(m.group(3)), second=0, microsecond=0).astimezone(UTC)
+        except ValueError:
+            return None
     if m := re.fullmatch(r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日\s*(?:(\d{1,2}):(\d{2}))?", text):
         year = int(m.group(1)) if m.group(1) else now.year
         try:
@@ -70,9 +73,21 @@ def parse_weibo_time(value: str | None, now: datetime | None = None) -> datetime
     return None
 
 
+def _rows(payload: dict, *path: str) -> list[dict]:
+    from ..core.errors import AppError
+    value = payload
+    for key in path:
+        if not isinstance(value,dict) or key not in value:
+            raise AppError("PROVIDER_SCHEMA_CHANGED","响应缺少预期的数据结构。",502)
+        value = value[key]
+    if not isinstance(value,list) or any(not isinstance(row,dict) for row in value):
+        raise AppError("PROVIDER_SCHEMA_CHANGED","预期条目列表，收到不兼容响应。",502)
+    return value
+
+
 def parse_xiaohongshu(payload: dict, query: str) -> list[RawItem]:
     items = []
-    for wrapper in ((payload.get("data") or {}).get("data") or {}).get("items") or []:
+    for wrapper in _rows(payload,"data","data","items"):
         note = wrapper.get("note") or {}
         note_id = str(note.get("id") or "")
         if not note_id:
@@ -86,14 +101,14 @@ def parse_xiaohongshu(payload: dict, query: str) -> list[RawItem]:
             author=user.get("nickname"), source="xiaohongshu", platform="xiaohongshu",
             published_at=_epoch(note.get("timestamp")), updated_at_source=_epoch(note.get("update_time")),
             engagement={"likes": _count(note.get("liked_count")), "comments": _count(note.get("comments_count")), "collects": _count(note.get("collected_count"))},
-            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "xiaohongshu", "note_type": str(note.get("type") or "")},
+            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "xiaohongshu", "content_kind":"note", "note_type": str(note.get("type") or "")},
         ))
     return items
 
 
 def parse_weibo(payload: dict, query: str, now: datetime | None = None) -> list[RawItem]:
     items = []
-    for post in ((payload.get("data") or {}).get("parsed_data") or {}).get("results") or []:
+    for post in _rows(payload,"data","parsed_data","results"):
         weibo_id = str(post.get("weibo_id") or "")
         content = clean_text(post.get("content"))
         if not weibo_id or not content:
@@ -106,14 +121,14 @@ def parse_weibo(payload: dict, query: str, now: datetime | None = None) -> list[
             author=post.get("user_nick") or post.get("user_name"), source="weibo", platform="weibo",
             published_at=parse_weibo_time(post.get("publish_time"), now),
             engagement={"reposts": _count(interaction.get("repost_count")), "comments": _count(interaction.get("comment_count")), "likes": _count(interaction.get("like_count"))},
-            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "weibo", "publish_time_raw": str(post.get("publish_time") or "")},
+            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "weibo", "content_kind":"post", "publish_time_raw": str(post.get("publish_time") or "")},
         ))
     return items
 
 
 def parse_zhihu(payload: dict, query: str) -> list[RawItem]:
     items = []
-    for entry in (payload.get("data") or {}).get("data") or []:
+    for entry in _rows(payload,"data","data"):
         if entry.get("type") != "search_result":
             continue
         obj = entry.get("object") or {}
@@ -133,14 +148,14 @@ def parse_zhihu(payload: dict, query: str) -> list[RawItem]:
             author=(obj.get("author") or {}).get("name"), source="zhihu", platform="zhihu",
             published_at=_epoch(obj.get("created_time")), updated_at_source=_epoch(obj.get("updated_time")),
             engagement={"likes": _count(obj.get("voteup_count")), "comments": _count(obj.get("comment_count"))},
-            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "zhihu", "zhihu_type": str(kind)},
+            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "zhihu", "content_kind":kind, "zhihu_type": str(kind)},
         ))
     return items
 
 
 def parse_douyin(payload: dict, query: str) -> list[RawItem]:
     items = []
-    for card in (payload.get("data") or {}).get("data") or []:
+    for card in _rows(payload,"data","data"):
         aweme = card.get("aweme_info") or {}
         aweme_id = str(aweme.get("aweme_id") or "")
         desc = clean_text(aweme.get("desc"))
@@ -154,8 +169,17 @@ def parse_douyin(payload: dict, query: str) -> list[RawItem]:
             author=author.get("nickname"), source="douyin", platform="douyin",
             published_at=_epoch(aweme.get("create_time")),
             engagement={"likes": _count(stats.get("digg_count")), "comments": _count(stats.get("comment_count")), "shares": _count(stats.get("share_count")), "plays": _count(stats.get("play_count"))},
-            metadata={"query": query, "acquisition_tool": "tikhub", "original_platform": "douyin", "top_comments": " | ".join(comments[:3])[:500]},
+            metadata={"content_kind":"video","query": query, "acquisition_tool": "tikhub", "original_platform": "douyin", "top_comments": " | ".join(comments[:3])[:500]},
         ))
+        for comment in card.get("comment_list") or []:
+            cid = comment.get("cid") or comment.get("comment_id") or comment.get("id")
+            text = clean_text(comment.get("text"))
+            if not cid or len(text) < 10:
+                continue
+            items.append(RawItem(external_id=f"{aweme_id}:comment:{cid}",title=text[:160],content=text,
+                url=f"https://www.douyin.com/video/{aweme_id}#comment-{cid}",author=(comment.get("user") or {}).get("nickname"),
+                source="douyin",platform="douyin",published_at=_epoch(comment.get("create_time")),
+                metadata={"query":query,"acquisition_tool":"tikhub","original_platform":"douyin","content_kind":"comment","parent_video_id":aweme_id,"comment_id":str(cid)}))
     return items
 
 
@@ -173,6 +197,12 @@ class _TikHubCnCollector(SourceAdapter):
         raise NotImplementedError
 
     async def search(self, query: str) -> list[RawItem]:
+        items, next_cursor = await self.search_page(query)
+        for item in items:
+            item.metadata["next_cursor"] = next_cursor
+        return items
+
+    async def search_page(self, query: str, cursor: str | None = None) -> tuple[list[RawItem], str | None]:
         settings = get_settings()
         query = query.strip()
         if not query:
@@ -182,13 +212,27 @@ class _TikHubCnCollector(SourceAdapter):
         url = settings.tikhub_base_url.rstrip("/") + self.path
         headers = {"Authorization": f"Bearer {settings.tikhub_api_key}", "Accept": "application/json"}
         args = self.request_args(query)
+        if cursor is not None:
+            position = int(cursor)
+            if not 0 <= position <= 10000:
+                raise ValueError("Invalid cursor")
+            key = "page" if self.slug in {"xiaohongshu", "weibo"} else "offset" if self.slug == "zhihu" else "cursor"
+            args[key] = str(position) if self.slug == "zhihu" else position
         if self.method == "POST":
-            payload = await fetcher.post_json(url, args, headers=headers, timeout=90)
+            payload = await fetcher.post_json(url, args, headers=headers, timeout=90, billable_provider="tikhub", billable_source=self.slug)
         else:
-            payload = await fetcher.get_json(url + "?" + urlencode(args), headers=headers, timeout=90)
+            payload = await fetcher.get_json(url + "?" + urlencode(args), headers=headers, timeout=90, billable_provider="tikhub", billable_source=self.slug)
         if payload.get("code") not in (None, 200):
-            raise RuntimeError(f"TikHub returned code {payload.get('code')}: {payload.get('message', '')}")
-        return self.parse(payload, query)
+            raise RuntimeError("PROVIDER_REJECTED_REQUEST")
+        if not isinstance(payload.get("data"), dict):
+            raise RuntimeError("PROVIDER_SCHEMA_CHANGED")
+        data = payload["data"]
+        next_cursor = data.get("next_cursor")
+        if next_cursor is None and data.get("has_more") and self.slug in {"xiaohongshu","weibo"}:
+            next_cursor = str(int(args["page"]) + 1)
+        if next_cursor is None and data.get("has_more") and data.get("cursor") is not None:
+            next_cursor = str(data["cursor"])
+        return self.parse(payload, query), str(next_cursor) if next_cursor is not None else None
 
 
 class XiaohongshuCollector(_TikHubCnCollector):

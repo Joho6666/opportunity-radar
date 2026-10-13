@@ -18,4 +18,4 @@ def create_database_engine() -> Engine | None:
     Repository implementations can switch to this engine without changing API services.
     """
     url = get_settings().database_url
-    return create_engine(_ensure_psycopg3(url), pool_pre_ping=True) if url else None
+    return create_engine(_ensure_psycopg3(url), pool_pre_ping=True, hide_parameters=True) if url else None

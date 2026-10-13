@@ -9,4 +9,7 @@ def get_repository() -> Repository:
 
 
 async def get_current_user(user: CurrentUser = Depends(current_user)) -> CurrentUser:
-    return user
+    from uuid import uuid4
+    from ..services.billing_gateway import paid_context
+    with paid_context(get_repository(), user.id, "assistant", str(uuid4())):
+        yield user

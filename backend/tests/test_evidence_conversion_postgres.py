@@ -21,10 +21,7 @@ def pg():
         pytest.skip("postgres engine unavailable")
     repo = PostgresRepository(engine)
     user_id = str(uuid4())
-    try:
-        repo.get_profile(user_id)
-    except Exception as exc:
-        pytest.skip(f"postgres schema unavailable: {exc}")
+    repo.get_profile(user_id)
     return repo, user_id
 
 

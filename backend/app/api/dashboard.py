@@ -5,6 +5,11 @@ from ..core.security import CurrentUser
 from ..repositories.base import Repository
 from ..services.income import potential_income_range
 router = APIRouter(prefix="/api", tags=["Dashboard"])
+
+@router.get("/dashboard/acquisition")
+async def acquisition(user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    from ..services.acquisition_metrics import acquisition_metrics
+    return acquisition_metrics(repo,user.id)
 class DashboardRead(BaseModel):
     scanned: int; found: int; matched: int; recommended: int; potential_income_min: int; potential_income_max: int; won_count: int; won_revenue: int
 @router.get("/dashboard", response_model=DashboardRead)

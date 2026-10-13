@@ -6,16 +6,16 @@ from urllib.parse import urlsplit, urlunsplit
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
-EvidenceCategory = Literal["buyer", "content", "market"]
+EvidenceCategory = Literal["buyer", "seller", "job", "content", "market"]
 EvidenceGrade = Literal["A", "B", "C"]
 
 
 class EvidenceInput(BaseModel):
     source: str = Field(min_length=1, max_length=80)
     url: HttpUrl
-    raw_text: str = Field(min_length=10, max_length=20_000)
+    raw_text: str = Field(min_length=10, max_length=100_000)
     query: str = Field(default="", max_length=500)
     external_id: str | None = Field(default=None, max_length=300)
     published_at: datetime | None = None
@@ -37,6 +37,13 @@ class EvidenceInput(BaseModel):
 class EvidenceBatch(BaseModel):
     batch_id: str = Field(min_length=1, max_length=120)
     items: list[EvidenceInput] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def bounded_batch(self):
+        if sum(len(item.raw_text) for item in self.items) > 2_000_000:
+            raise ValueError("Evidence batch exceeds 2 million characters")
+        return self
+
 
 
 class EvidenceRecord(BaseModel):
@@ -76,11 +83,11 @@ class EvidenceUpsertResult(BaseModel):
 
 def _canonical_url(url: str) -> str:
     parts = urlsplit(url)
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), parts.query, ""))
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), "&".join(p for p in parts.query.split("&") if not p.startswith(("utm_", "xsec_", "fbclid=", "gclid="))), ""))
 
 
 def evidence_identity(item: EvidenceInput) -> str:
-    identity = item.external_id if item.external_id else f"{_canonical_url(str(item.url))}|{item.raw_text.strip()}"
+    identity = item.external_id if item.external_id else _canonical_url(str(item.url))
     return hashlib.sha256(f"{item.source}|{identity}".encode("utf-8")).hexdigest()
 
 

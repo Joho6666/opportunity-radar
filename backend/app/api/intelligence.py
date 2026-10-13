@@ -3,7 +3,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..api.deps import get_current_user, get_repository
 from ..collectors.registry import registry
@@ -25,6 +25,7 @@ BILLABLE_SOURCES = TIKHUB_SOURCES | {"web_search"}
 
 
 class EvidenceCollectRequest(BaseModel):
+    cursor: str | None = Field(default=None,max_length=100)
     manual_confirmed: bool = False
 
 
@@ -40,10 +41,11 @@ def _source_status() -> dict[str, dict[str, bool]]:
 
 
 @router.get("/evidence/runtime")
-async def evidence_runtime(user: CurrentUser = Depends(get_current_user)):
+async def evidence_runtime(user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     settings = get_settings()
     return {
-        "storage_mode": "memory" if settings.use_in_memory_store else "postgres",
+        "paid_api_enabled": settings.paid_api_enabled,
+        "storage_mode": "postgres" if hasattr(repo, "engine") else "memory",
         "warning": "当前使用内存存储，重启后数据不会保留。" if settings.use_in_memory_store else None,
         "sources": _source_status(),
     }
@@ -58,13 +60,21 @@ async def collect_evidence(
     user: CurrentUser = Depends(get_current_user),
     repo: Repository = Depends(get_repository),
 ):
+    collection_id = str(uuid4())
     status = _source_status()[source]
     if source in BILLABLE_SOURCES and not payload.manual_confirmed:
         raise AppError("MANUAL_CONFIRMATION_REQUIRED", "该数据源可能产生费用，请先确认后再采集。", 400)
     if not status["configured"]:
         raise AppError("SOURCE_NOT_CONFIGURED", "该数据源尚未配置，无法采集。", 400)
 
-    items, provider_error = await registry.search(source, query)
+    if source in BILLABLE_SOURCES and not get_settings().paid_api_enabled:
+        raise AppError("PAID_API_DISABLED", "真实付费调用已关闭。", 403)
+    from ..services.billing_gateway import paid_context
+    with paid_context(repo, user.id, "evidence", collection_id):
+        if payload.cursor is not None:
+            items, provider_error = await registry.search(source, query, cursor=payload.cursor, paged=True)
+        else:
+            items, provider_error = await registry.search(source, query)
     if provider_error:
         raise AppError(provider_error.get("error_code", "COLLECTOR_FAILED"), "数据源采集失败，请稍后重试。", 502)
 
@@ -88,17 +98,24 @@ async def collect_evidence(
         accepted.append(item.model_copy(update={"metadata": metadata}))
 
     if not accepted:
+        repo.record_collection(user.id,collection_id,source,len(items),0,stale=stale)
         return {"batch_id": None, "fetched": len(items), "inserted": 0, "duplicates": 0, "rejected": rejected, "stale": stale, "records": [], "warning": "内存存储" if get_settings().use_in_memory_store else None}
 
     batch = raw_items_to_evidence_batch(
         source="tiktok" if source == "tikhub" else source,
         query=query,
         items=accepted,
-        batch_id=str(uuid4()),
+        batch_id=collection_id,
     )
+    from ..services.semantic_classifier import enrich_batch
+    from ..services.billing_gateway import paid_context
+    with paid_context(repo, user.id, "evidence", collection_id):
+        batch = await enrich_batch(batch)
     result = repo.upsert_evidence_batch(user.id, batch)
+    repo.record_collection(user.id,collection_id,source,len(items),result.inserted,result.duplicates,stale)
     return {
         "batch_id": result.batch_id,
+        "next_cursor": items[0].metadata.get("next_cursor") if items else None,
         "fetched": len(items),
         "inserted": result.inserted,
         "duplicates": result.duplicates,
@@ -129,7 +146,7 @@ async def ingest_evidence(
 
 @router.get("/evidence", response_model=list[EvidenceRecord])
 async def list_evidence(
-    category: str | None = Query(default=None, pattern="^(buyer|content|market)$"),
+    category: str | None = Query(default=None, pattern="^(buyer|seller|job|content|market)$"),
     limit: int = Query(default=100, ge=1, le=500),
     user: CurrentUser = Depends(get_current_user),
     repo: Repository = Depends(get_repository),
@@ -164,7 +181,9 @@ async def convert_evidence(evidence_id: str, payload: EvidenceConversion, user: 
     high = payload.budget_max if payload.budget_max is not None else 0
     unknown = payload.budget_min is None
     oid = str(uuid4())
-    item = OpportunityRead(id=oid, radar_id=radars[0].id, type="client", title=title, summary=summary, source=evidence.source, source_url=str(evidence.url), published_at=evidence.published_at, location="线上", work_mode="online", budget_min=low, budget_max=high, estimated_hours=1, estimated_hourly_rate=(low, high), match_score=0, opportunity_score=0, conversion_probability=0, risk_score=0, recommendation="待人工评估", status="new", warnings=["预算未知，未进行金额推断"] if unknown else [], verification_status="unverified", evidence_id=evidence.evidence_id, metadata={"evidence_id": evidence.evidence_id, "provenance": {"source": evidence.source, "url": str(evidence.url)}, "budget_unknown": unknown})
+    from ..services.acquisition_priority import priority
+    ranking=priority(evidence,skills=[skill.name for skill in repo.get_profile(user.id).skills],published_at=evidence.published_at)
+    item = OpportunityRead(id=oid, radar_id=(metadata.get("radar_id") if any(r.id == metadata.get("radar_id") for r in radars) else radars[0].id), type="client", title=title, summary=summary, source=evidence.source, source_url=str(evidence.url), published_at=evidence.published_at, location="线上", work_mode="online", budget_min=low, budget_max=high, estimated_hours=1, estimated_hourly_rate=(low, high), match_score=0, opportunity_score=ranking["score"], conversion_probability=0, risk_score=0, recommendation="待人工评估", status="new", reasons=ranking["reasons"], warnings=["预算未知，未进行金额推断"] if unknown else [], verification_status="verified", evidence_id=evidence.evidence_id, metadata={"evidence_id": evidence.evidence_id, "provenance": {"source": evidence.source, "url": str(evidence.url)}, "budget_unknown": unknown, "hours_unknown": True, "currency": "CNY" if not unknown else None, "budget_source": "manual_review" if not unknown else "unknown", "score_kind": "prediction", "priority_breakdown": ranking, "radar_id": metadata.get("radar_id", "")})
     return repo.convert_evidence(user.id, evidence_id, item)
 
 

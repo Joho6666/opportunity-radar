@@ -7,6 +7,8 @@ from .postgres import PostgresRepository
 
 @lru_cache
 def get_repository_singleton():
+    from ..core.config import validate_runtime
+    validate_runtime()
     settings = get_settings()
     if settings.use_in_memory_store:
         return memory_singleton

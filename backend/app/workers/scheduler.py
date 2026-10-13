@@ -22,20 +22,20 @@ _last_cleanup_day: str | None = None
 _ADVISORY_LOCK_KEY = 727272
 
 
-def _try_advisory_lock() -> bool:
-    """Single-instance guard for multi-replica schedulers (Postgres mode only)."""
-    from ..database.client import create_database_engine
+from contextlib import contextmanager
 
+@contextmanager
+def scheduler_lock():
+    from ..database.client import create_database_engine
     engine = create_database_engine()
     if engine is None:
-        return True  # memory mode: nothing to protect
-    try:
-        with engine.connect() as conn:
-            row = conn.exec_driver_sql(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})").first()
-            return bool(row and row[0])
-    except Exception:
-        logger.exception("advisory lock check failed; assuming single instance")
-        return True
+        yield True
+        return
+    # Hold this transaction/connection through the whole cycle. Pool release
+    # never leaves a session lock behind; failure is closed.
+    with engine.begin() as conn:
+        acquired = conn.exec_driver_sql("SELECT pg_try_advisory_xact_lock(727272)").scalar()
+        yield bool(acquired)
 
 
 async def tick(now: datetime | None = None) -> int:
@@ -44,6 +44,7 @@ async def tick(now: datetime | None = None) -> int:
     queued = 0
     for user_id, radar_id in due:
         run = repo.create_run(radar_id)
+        run = repo.save_run(run.model_copy(update={"stage_stats": {"trigger": "scheduled"}}))
         await enqueue_radar_run(user_id, radar_id, run.id)
         queued += 1
     return queued
@@ -102,15 +103,15 @@ async def main() -> None:
     while True:
         try:
             await asyncio.sleep(random.uniform(0, 10))  # jitter against replica thundering herds
-            if not _try_advisory_lock():
-                logger.info("another scheduler instance holds the advisory lock; skipping tick")
-                continue
-            started = time.perf_counter()
-            queued = await tick()
-            logger.info("scheduler tick queued=%s", queued)
-            await intelligence_tick()
-            await maintenance_tick()
-            logger.info("scheduler cycle done", extra={"latency_ms": int((time.perf_counter() - started) * 1000)})
+            with scheduler_lock() as acquired:
+                if not acquired:
+                    continue
+                started = time.perf_counter()
+                queued = await tick()
+                logger.info("scheduler tick queued=%s", queued)
+                await intelligence_tick()
+                await maintenance_tick()
+                logger.info("scheduler cycle done", extra={"latency_ms": int((time.perf_counter() - started) * 1000)})
         except Exception:
             logger.exception("scheduler tick failed")
         await asyncio.sleep(60)

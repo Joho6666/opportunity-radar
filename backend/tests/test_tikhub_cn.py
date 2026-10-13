@@ -105,16 +105,16 @@ def test_clean_text_strips_markup_and_entities():
     ("正文没有关键词", "[私活]有一个 im 需求寻找一位 flutter 客户端", "buyer"),
     ("WordPress 站点主题制作，长期合作", "招一个业余兼职小说/剧本写手", "buyer"),
     # sellers, including demand words inside seller phrases
-    ("可以做官网和小程序，预算多少都能聊", "个人承接网站及前端开发项目", "market"),
-    ("35 岁被辞了可以自己接外包啊", None, "market"),
-    ("本人5年大厂经验，独立设计开发小程序", "独立软件设计：小程序好看好用", "market"),
-    ("简单页面修改：29.9 元起，预算不多也能安排", None, "market"),
+    ("可以做官网和小程序，预算多少都能聊", "个人承接网站及前端开发项目", "seller"),
+    ("35 岁被辞了可以自己接外包啊", None, "seller"),
+    ("本人5年大厂经验，独立设计开发小程序", "独立软件设计：小程序好看好用", "seller"),
+    ("简单页面修改：29.9 元起，预算不多也能安排", None, "seller"),
     # articles about the topic, not requests
     ("找人开发软件，先写清这5件事", None, "content"),
     ("程序员接私活，十大渠道！", None, "content"),
     ("2026年靠谱的10个程序员兼职平台", None, "content"),
     # job posts: "3 年经验" is a requirement, not a how-to
-    ("负责后端开发，要求 3 年经验，薪资 15-25k", "remote 高级 PHP 开发工程师 招聘", "buyer"),
+    ("负责后端开发，要求 3 年经验，薪资 15-25k", "remote 高级 PHP 开发工程师 招聘", "job"),
     ("AssumeAI | AI Engineer (£30/hr) | Contract | REMOTE (UK)", None, "buyer"),
 ])
 def test_domestic_and_forum_classification(text, title, expected):
@@ -122,5 +122,54 @@ def test_domestic_and_forum_classification(text, title, expected):
 
 
 def test_self_labelled_seller_title_wins_over_demand_words():
-    assert classify_tiktok("我能帮你做官网和小程序", title="[接单]全栈开发 | 创业者软件定制 | 官网 / 小程序").category == "market"
-    assert classify_tiktok("要求熟悉 React", title="【求职】前端开发，可远程").category == "market"
+    assert classify_tiktok("我能帮你做官网和小程序", title="[接单]全栈开发 | 创业者软件定制 | 官网 / 小程序").category == "seller"
+    assert classify_tiktok("要求熟悉 React", title="【求职】前端开发，可远程").category == "job"
+
+
+@pytest.mark.parametrize("parser",[parse_douyin,parse_xiaohongshu,parse_weibo,parse_zhihu])
+@pytest.mark.parametrize("payload",[{}, {"data":None}, {"data":{"data":"changed","parsed_data":None}}])
+def test_domestic_schema_changes_are_visible(parser,payload):
+    from app.core.errors import AppError
+    with pytest.raises(AppError):parser(payload,"需求")
+
+@pytest.mark.parametrize("parser,payload",[
+    (parse_xiaohongshu,{"data":{"data":{"items":[]}}}),
+    (parse_weibo,{"data":{"parsed_data":{"results":[]}}}),
+    (parse_douyin,{"data":{"data":[]}}),
+    (parse_zhihu,{"data":{"data":[]}}),
+])
+def test_empty_domestic_success_is_distinct_from_schema_failure(parser,payload):
+    assert parser(payload,"需求") == []
+
+
+def test_comment_author_and_evidence_identity_stay_separate():
+    payload={"data":{"data":[{"aweme_info":{"aweme_id":"v1","desc":"我们专业团队提供剪辑服务","author":{"nickname":"服务商"}},"comment_list":[{"cid":"c1","text":"需要制作商品视频，请问报价多少","user":{"nickname":"买方"}},{"text":"没有ID的评论不能当作独立证据"}]}]}}
+    video,comment=parse_douyin(payload,"视频")
+    assert video.author == "服务商" and comment.author == "买方"
+    assert video.external_id != comment.external_id
+    assert comment.metadata["parent_video_id"] == "v1"
+    assert classify_tiktok(comment.content).category == "buyer"
+
+@pytest.mark.parametrize("cls,key,cursor",[
+    (tikhub_cn.XiaohongshuCollector,"page",2),
+    (tikhub_cn.WeiboCollector,"page",2),
+    (tikhub_cn.ZhihuCollector,"offset","20"),
+    (tikhub_cn.DouyinCollector,"cursor",20),
+])
+def test_domestic_cursor_is_explicit_and_bounded(monkeypatch,cls,key,cursor):
+    from urllib.parse import urlparse,parse_qs
+    calls=[]
+    async def get(url,**kwargs):calls.append(parse_qs(urlparse(url).query));return {"code":200,"data":{"data":[],"parsed_data":{"results":[]}}}
+    async def post(url,args,**kwargs):calls.append(args);return {"code":200,"data":{"data":[]}}
+    if cls is tikhub_cn.XiaohongshuCollector:
+        async def get(url,**kwargs):calls.append(parse_qs(urlparse(url).query));return {"code":200,"data":{"data":{"items":[]}}}
+    monkeypatch.setattr(tikhub_cn,"get_settings",lambda:Settings(tikhub_api_key="offline-only"))
+    monkeypatch.setattr(tikhub_cn.fetcher,"get_json",get);monkeypatch.setattr(tikhub_cn.fetcher,"post_json",post)
+    assert asyncio.run(cls().search_page("需求",str(cursor))) == ([],None)
+    value=calls[0][key]
+    assert str(value[0] if isinstance(value,list) else value) == str(cursor)
+    with pytest.raises(ValueError):asyncio.run(cls().search_page("需求","-1"))
+
+@pytest.mark.parametrize("raw",["今天 99:99","2026年2月30日","昨天 25:00"])
+def test_invalid_weibo_dates_are_unknown(raw):
+    assert parse_weibo_time(raw,NOW) is None

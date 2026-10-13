@@ -26,7 +26,7 @@ def test_evidence_preview_requires_auth_and_deduplicates():
     client = TestClient(app)
     assert client.post("/api/intelligence/evidence/preview", json=payload).status_code in {401, 403}
 
-    token = jwt.encode({"sub": "evidence-user", "aud": "authenticated"}, "", algorithm="HS256")
+    token = jwt.encode({"sub": "00000000-0000-0000-0000-00000000edce", "aud": "authenticated"}, "offline-test-jwt-secret-not-for-deployment", algorithm="HS256")
     response = client.post(
         "/api/intelligence/evidence/preview",
         headers={"Authorization": f"Bearer {token}"},

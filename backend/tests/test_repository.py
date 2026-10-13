@@ -43,7 +43,7 @@ def _contract(repo, user_id: str) -> None:
     assert items
     first = items[0]
     repo.save_opportunity(first.model_copy(update={"status": "won"}))
-    assert repo.won_revenue(user_id) == first.budget_max
+    assert repo.won_revenue(user_id) == 0
     repo.record_action(first.id, OpportunityAction(actual_revenue=123), action="won")
     assert repo.won_revenue(user_id) == 123
 
@@ -75,10 +75,7 @@ def test_postgres_repository_contract():
         pytest.skip("postgres engine unavailable")
     repo = PostgresRepository(engine)
     user_id = str(uuid4())
-    try:
-        repo.get_profile(user_id)
-    except Exception as exc:
-        pytest.skip(f"postgres schema unavailable: {exc}")
+    repo.get_profile(user_id)
     _contract(repo, user_id)
 
 

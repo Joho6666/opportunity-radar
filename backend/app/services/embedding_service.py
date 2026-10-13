@@ -46,7 +46,10 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
         return []
     if not settings.llm_api_key or not settings.llm_base_url:
         return None
+    reservation = None
     try:
+        from .billing_gateway import reserve, finish
+        reservation = reserve("embedding", "embeddings", sum(len(t.encode("utf-8")) for t in texts[:64]))
         response = httpx.post(
             f"{settings.llm_base_url.rstrip('/')}/embeddings",
             headers={"Authorization": f"Bearer {settings.llm_api_key}"},
@@ -55,10 +58,13 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
         )
         response.raise_for_status()
         payload = response.json()
+        finish(reservation, payload)
         data = payload.get("data") or []
         return [normalize_vector(item["embedding"]) for item in data]
     except Exception:
-        logger.exception("embedding request failed", extra={"count": len(texts)})
+        if reservation:
+            finish(reservation, ok=False)
+        logger.warning("embedding unavailable", extra={"count": len(texts)})
         return None
 
 
@@ -69,7 +75,10 @@ async def embed_texts_async(texts: list[str]) -> list[list[float]] | None:
         return []
     if not settings.llm_api_key or not settings.llm_base_url:
         return None
+    reservation = None
     try:
+        from .billing_gateway import reserve, finish
+        reservation = reserve("embedding", "embeddings", sum(len(t.encode("utf-8")) for t in texts[:64]))
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{settings.llm_base_url.rstrip('/')}/embeddings",
@@ -77,8 +86,12 @@ async def embed_texts_async(texts: list[str]) -> list[list[float]] | None:
                 json={"model": settings.embedding_model, "input": texts[:64]},
             )
             response.raise_for_status()
-            data = response.json().get("data") or []
+            payload = response.json()
+            finish(reservation, payload)
+            data = payload.get("data") or []
             return [normalize_vector(item["embedding"]) for item in data]
     except Exception:
-        logger.exception("embedding request failed", extra={"count": len(texts)})
+        if reservation:
+            finish(reservation, ok=False)
+        logger.warning("embedding unavailable", extra={"count": len(texts)})
         return None

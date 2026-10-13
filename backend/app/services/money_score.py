@@ -105,17 +105,17 @@ def score_from_analysis(
 ) -> MoneyScoreBreakdown:
     """Derive the 11 dimensions from pipeline artifacts (no extra LLM calls)."""
     demand_velocity = min(100, int(cluster_velocity * 12 + min(cluster_docs, 20) * 2 + analysis.urgency * 0.2))
-    payment = min(100, payment_signals * 30 + (25 if analysis.commercial_intent >= 60 else 0))
+    payment = min(100, payment_signals * 30 + (25 if budget > 0 else 0))
     supply_gap = max(0, min(100, 100 - analysis.competition))
-    margin = min(100, int((budget / max(estimated_hours, 1)) * 1.2))
+    margin = 50 if budget <= 0 or analysis.estimated_hours == 1 else min(100, int((budget / max(estimated_hours, 1)) * 1.2))
     repeatability = min(100, 40 + (20 if analysis.type in {"client", "business"} else 0) + (10 if analysis.work_mode == "online" else 0))
-    freshness = 100 if hours_since_published is None else max(0, 100 - int(hours_since_published / 24 * 8))
+    freshness = 50 if hours_since_published is None else max(0, 100 - int(hours_since_published / 24 * 8))
     edge = information_edge.total if information_edge else 50
-    difficulty = min(100, int(analysis.estimated_hours * 2.5))
+    difficulty = 50 if analysis.estimated_hours == 1 else min(100, int(analysis.estimated_hours * 2.5))
     skills = profile_skills or []
     fit = analysis.skill_match if not skills else min(100, analysis.skill_match + (10 if set(s.lower() for s in skills) & set(s.lower() for s in analysis.skills) else 0))
     fit = min(100, fit + personal_fit_boost)
-    confidence = min(100, int(analysis.conversion_probability * 0.4 + (30 if payment_signals else 0) + (20 if cluster_docs >= 3 else 0) + 10))
+    confidence = min(100, int((30 if payment_signals else 0) + (20 if cluster_docs >= 3 else 0) + 10))
     return money_score(
         demand_velocity=demand_velocity,
         payment_evidence=payment,

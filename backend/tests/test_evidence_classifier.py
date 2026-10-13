@@ -38,7 +38,7 @@ def test_ad_case_with_engagement_is_market_not_buyer():
 )
 def test_seller_self_promotion_is_not_buyer(text):
     result = classify_tiktok(text)
-    assert result.category == "market"
+    assert result.category == "seller"
     assert result.reason_code == "seller_self_promotion"
     assert result.evidence_grade == "C"
 

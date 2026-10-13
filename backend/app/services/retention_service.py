@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 async def cleanup_expired(repository) -> dict[str, int]:
     settings = get_settings()
     removed: dict[str, int] = {}
+    if not settings.allow_retention_delete:
+        return removed
     if settings.retention_raw_items_days > 0:
         removed["raw_items"] = repository.cleanup_raw_items(settings.retention_raw_items_days)
     if settings.retention_llm_calls_days > 0:

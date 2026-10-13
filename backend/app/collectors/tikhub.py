@@ -26,6 +26,7 @@ class TikHubCollector(SourceAdapter):
         endpoint = settings.tikhub_base_url.rstrip("/") + self.path
         payload = await fetcher.get_json(
             endpoint + "?" + urlencode({"keyword": query.strip(), "offset": 0}),
+            billable_provider="tikhub", billable_source=self.slug,
             headers={"Authorization": f"Bearer {settings.tikhub_api_key}", "Accept": "application/json"},
         )
         if payload.get("code") not in (None, 200):
@@ -58,6 +59,7 @@ class TikHubCollector(SourceAdapter):
                     "plays": (item.get("stats") or {}).get("playCount"),
                 },
                 metadata={
+                    "content_kind": "video",
                     "query": query,
                     "nickname": author.get("nickname", ""),
                     "acquisition_tool": "tikhub",

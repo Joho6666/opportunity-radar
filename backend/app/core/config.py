@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,15 @@ class Settings(BaseSettings):
     allow_fake_ip_dns: bool = False
     cors_origins: str = "http://127.0.0.1:3001,http://localhost:3000"
     use_in_memory_store: bool = True
+    enable_ai_classification: bool = False
+    paid_api_enabled: bool = False
+    paid_daily_cost_limit: float = Field(default=1.0,gt=0,allow_inf_nan=False)
+    paid_daily_request_limit: int = Field(default=20,ge=1,le=100000)
+    tikhub_price_per_request: float = 0.0
+    firecrawl_price_per_request: float = 0.0
+    embedding_price_per_mtok: float = 0.0
+    llm_max_output_tokens: int = Field(default=800,ge=1,le=16000)
+    allow_retention_delete: bool = False
     # Money Intelligence settings
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
@@ -54,3 +64,15 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_runtime() -> None:
+    """The same production gate applies to API, scheduler and workers."""
+    import os
+    settings = get_settings()
+    if settings.app_env.lower() not in {"prod", "production"}:
+        return
+    if settings.auth_disabled or settings.use_in_memory_store or not settings.database_url or not settings.supabase_jwt_secret:
+        raise RuntimeError("Production requires PostgreSQL and JWT authentication; AUTH_DISABLED is forbidden")
+    if os.getenv("INCLUDE_MOCK_COLLECTOR", "false").lower() != "false" or settings.allow_fake_ip_dns:
+        raise RuntimeError("Production disallows mock collectors and fake-IP DNS")

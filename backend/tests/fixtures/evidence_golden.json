@@ -1,0 +1,576 @@
+[
+  {
+    "id": "buyer-1",
+    "text": "找人做一份路演PPT，预算1500元，本周交付。",
+    "title": null,
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "buyer-2",
+    "text": "求推荐靠谱的Word排版服务，论文只做格式检查，不代写。",
+    "title": null,
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "buyer-3",
+    "text": "有人接视频剪辑吗？需要三个商品宣传片，预算5000元。",
+    "title": null,
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "buyer-4",
+    "text": "我们需要外包网站开发，预算2万，月底交付。",
+    "title": null,
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "buyer-5",
+    "text": "急求简历设计，预算未知，请提供报价。",
+    "title": null,
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "buyer-6",
+    "text": "有偿找人帮我处理Excel数据，2000行去重。",
+    "title": null,
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "buyer-7",
+    "text": "Looking for a freelancer to animate my pitch deck, budget $500.",
+    "title": null,
+    "category": "buyer",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "buyer-8",
+    "text": "Need someone to format my Word report by Friday.",
+    "title": null,
+    "category": "buyer",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "buyer-9",
+    "text": "Seeking a freelance project partner for product ads, budget $1000.",
+    "title": null,
+    "category": "buyer",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "buyer-10",
+    "text": "Looking for help with PDF typesetting, no budget yet.",
+    "title": null,
+    "category": "buyer",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "buyer-11",
+    "text": "Need a developer for a contract project, build a small store website.",
+    "title": null,
+    "category": "buyer",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "buyer-12",
+    "text": "Anyone recommend a designer for my resume? Please quote.",
+    "title": null,
+    "category": "buyer",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "seller-1",
+    "text": "专业代做PPT，欢迎咨询，100元起。",
+    "title": null,
+    "category": "seller",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "seller-2",
+    "text": "个人承接网站开发项目，可接单。",
+    "title": null,
+    "category": "seller",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "seller-3",
+    "text": "视频剪辑接单，商务合作私信。",
+    "title": null,
+    "category": "seller",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "seller-4",
+    "text": "我们团队提供小程序定制，优惠价格。",
+    "title": null,
+    "category": "seller",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "seller-5",
+    "text": "一对一定制简历设计，欢迎咨询。",
+    "title": null,
+    "category": "seller",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "seller-6",
+    "text": "我是设计工作室，接广告和品牌推广。",
+    "title": null,
+    "category": "seller",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "seller-7",
+    "text": "Available for hire: I design pitch decks.",
+    "title": null,
+    "category": "seller",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "seller-8",
+    "text": "Open for commissions, DM for collab.",
+    "title": null,
+    "category": "seller",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "seller-9",
+    "text": "Book a call for my video editing service.",
+    "title": null,
+    "category": "seller",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "seller-10",
+    "text": "I am a freelancer, use code VIDEO for a discount.",
+    "title": null,
+    "category": "seller",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "seller-11",
+    "text": "Link in bio, DM me for collab on ads.",
+    "title": null,
+    "category": "seller",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "seller-12",
+    "text": "Available for hire for Excel automation.",
+    "title": null,
+    "category": "seller",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "job-1",
+    "text": "招聘全职前端开发，薪资15k，五险一金。",
+    "title": null,
+    "category": "job",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "job-2",
+    "text": "求职：三年经验的设计师找工作。",
+    "title": null,
+    "category": "job",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "job-3",
+    "text": "招聘实习生，负责视频剪辑，每周五天。",
+    "title": null,
+    "category": "job",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "job-4",
+    "text": "招聘Word排版岗位，月薪6000。",
+    "title": null,
+    "category": "job",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "job-5",
+    "text": "找工作，擅长Python数据分析。",
+    "title": null,
+    "category": "job",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "job-6",
+    "text": "全职AI工程师岗位，薪资面议。",
+    "title": null,
+    "category": "job",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "job-7",
+    "text": "Hiring a full-time video editor, salary $60000.",
+    "title": null,
+    "category": "job",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "job-8",
+    "text": "Job opening: frontend engineer, full-time.",
+    "title": null,
+    "category": "job",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "job-9",
+    "text": "Seeking a full-time designer to join our team.",
+    "title": null,
+    "category": "job",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "job-10",
+    "text": "Looking for an internship in AI engineering.",
+    "title": null,
+    "category": "job",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "job-11",
+    "text": "Job seeker with five years of experience.",
+    "title": null,
+    "category": "job",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "job-12",
+    "text": "Hiring full-time analyst, salary negotiable.",
+    "title": null,
+    "category": "job",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "content-1",
+    "text": "如何做PPT动画？有没有人能教我。",
+    "title": null,
+    "category": "content",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "content-2",
+    "text": "Excel去重教程，五分钟学会。",
+    "title": null,
+    "category": "content",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "content-3",
+    "text": "程序员外包避坑指南。",
+    "title": null,
+    "category": "content",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "content-4",
+    "text": "网站开发怎么选团队？先看完这篇攻略。",
+    "title": null,
+    "category": "content",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "content-5",
+    "text": "求教程：怎么制作AI视频广告？",
+    "title": null,
+    "category": "content",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "content-6",
+    "text": "简历优化经验分享，十个常见错误。",
+    "title": null,
+    "category": "content",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "content-7",
+    "text": "How to format a Word document: tutorial.",
+    "title": null,
+    "category": "content",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "content-8",
+    "text": "Tutorial: animate slides for a pitch deck.",
+    "title": null,
+    "category": "content",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "content-9",
+    "text": "Tips for selecting a web developer.",
+    "title": null,
+    "category": "content",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "content-10",
+    "text": "Why does my PDF look different?",
+    "title": null,
+    "category": "content",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "content-11",
+    "text": "How to create product video ads.",
+    "title": null,
+    "category": "content",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "content-12",
+    "text": "Tutorial on Excel cleanup for beginners.",
+    "title": null,
+    "category": "content",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "market-1",
+    "text": "今年AI视频制作工具的市场规模继续增长。",
+    "title": null,
+    "category": "market",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "market-2",
+    "text": "AI广告案例：一张产品图生成短视频。",
+    "title": null,
+    "category": "market",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "market-3",
+    "text": "本周科技行业融资新闻汇总。",
+    "title": null,
+    "category": "market",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "market-4",
+    "text": "GitHub项目发布了新版本，性能提升。",
+    "title": null,
+    "category": "market",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "market-5",
+    "text": "路演活动圆满结束，感谢所有参与者。",
+    "title": null,
+    "category": "market",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "market-6",
+    "text": "文档处理工具推出新功能。",
+    "title": null,
+    "category": "market",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "market-7",
+    "text": "A new open source AI tool was released today.",
+    "title": null,
+    "category": "market",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "paid_project"
+  },
+  {
+    "id": "market-8",
+    "text": "Market research: video editing industry grows.",
+    "title": null,
+    "category": "market",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "no_budget"
+  },
+  {
+    "id": "market-9",
+    "text": "The technology conference has ended.",
+    "title": null,
+    "category": "market",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "tutorial"
+  },
+  {
+    "id": "market-10",
+    "text": "Example of a product advertisement made with AI.",
+    "title": null,
+    "category": "market",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "expired"
+  },
+  {
+    "id": "market-11",
+    "text": "Quarterly financial results announced.",
+    "title": null,
+    "category": "market",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "repost"
+  },
+  {
+    "id": "market-12",
+    "text": "New spreadsheet tool now supports charts.",
+    "title": null,
+    "category": "market",
+    "language": "en",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "expired-buyer",
+    "text": "2019年有偿找人做网站，预算5000元，项目已结束。",
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "expired",
+    "published_at": "2019-01-01T00:00:00Z"
+  },
+  {
+    "id": "risk-buyer",
+    "text": "有偿找人代写论文，预算2000元，要求保证通过。",
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  },
+  {
+    "id": "repost-buyer",
+    "text": "找人做一份路演PPT，预算1500元，本周交付。",
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "duplicate",
+    "duplicate_of": "buyer-1"
+  },
+  {
+    "id": "scam-buyer",
+    "text": "有偿找人刷单，先交押金500元，日赚3000元。",
+    "category": "buyer",
+    "language": "zh",
+    "synthetic": true,
+    "scenario": "risk"
+  }
+]
