@@ -137,3 +137,34 @@ def test_reported_overrun_consumes_real_cost_and_stops_next_request(billing):
         assert err.value.code == "PAID_QUOTA_EXHAUSTED"
     with repo.engine.connect() as conn:
         assert conn.execute(text("SELECT reserved_micros,actual_micros FROM billing_calls WHERE id=CAST(:id AS uuid)"),{"id":reservation[1]}).one() == (50000,160000)
+
+
+def test_status_caps_every_scope_at_shared_account_balance(billing, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+
+    repo, uid = billing
+    monkeypatch.setattr(get_settings(), "paid_daily_request_limit", 2)
+    monkeypatch.setattr(get_settings(), "paid_daily_cost_limit", 0.12)
+    with repo.engine.begin() as conn:
+        conn.execute(text("INSERT INTO billing_authorizations(user_id,scope,enabled,providers,run_requests,daily_requests,run_micros,daily_micros) VALUES(CAST(:uid AS uuid),'assistant',true,'[\"llm\"]',3,5,100000,200000)"), {"uid": uid})
+    with paid_context(repo, uid, "evidence", str(uuid4())):
+        finish(reserve("tikhub", "douyin"), {"usage": {"cost_usd": 0.08}})
+
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    with TestClient(app) as client:
+        response = client.get("/api/billing/status")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["requests_today"] == 1
+    assert result["reserved_cost_usd"] == pytest.approx(0.05)
+    assert result["consumed_cost_usd"] == pytest.approx(0.08)
+    assert result["account_remaining_requests"] == 1
+    assert result["account_remaining_cost_usd"] == pytest.approx(0.04)
+    assert {policy["scope"] for policy in result["authorizations"]} == {"evidence", "assistant"}
+    for policy in result["authorizations"]:
+        assert policy["remaining_requests"] == 1
+        assert policy["remaining_cost_usd"] == pytest.approx(0.04)

@@ -7,6 +7,7 @@ from ..core.config import get_settings
 from ..core.errors import AppError
 from ..core.security import CurrentUser
 from ..repositories.postgres import as_uuid
+from ..services.billing_gateway import _micros
 
 router = APIRouter(prefix="/api/billing", tags=["Billing"])
 
@@ -39,7 +40,6 @@ async def authorize(scope: str, value: Authorization, user: CurrentUser = Depend
         repo.get_radar(user.id, scope)
     repo.get_profile(user.id)
     import json
-    from ..services.billing_gateway import _micros
     with repo.engine.begin() as conn:
         conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:uid,0))"), {"uid": as_uuid(user.id)})
         conn.execute(text("INSERT INTO billing_authorizations(user_id,scope,enabled,providers,allow_scheduled,run_requests,daily_requests,run_micros,daily_micros) VALUES(CAST(:uid AS uuid),:scope,:enabled,CAST(:providers AS jsonb),:allow_scheduled,:run_requests,:daily_requests,:run_micros,:daily_micros) ON CONFLICT(user_id,scope) DO UPDATE SET enabled=EXCLUDED.enabled,providers=EXCLUDED.providers,allow_scheduled=EXCLUDED.allow_scheduled,run_requests=EXCLUDED.run_requests,daily_requests=EXCLUDED.daily_requests,run_micros=EXCLUDED.run_micros,daily_micros=EXCLUDED.daily_micros,updated_at=now()"),
@@ -57,9 +57,17 @@ async def status(user: CurrentUser = Depends(get_current_user), repo=Depends(get
         policies = conn.execute(text("SELECT scope,enabled,providers,allow_scheduled,run_requests,daily_requests,run_micros,daily_micros FROM billing_authorizations WHERE user_id=CAST(:uid AS uuid)"), {"uid": uid}).mappings().all()
         calls = conn.execute(text("SELECT scope,count(*) requests,sum(GREATEST(reserved_micros,COALESCE(actual_micros,0))) cost,sum(reserved_micros) estimated,CASE WHEN count(actual_micros)=count(*) THEN sum(actual_micros) ELSE NULL END actual,sum(actual_tokens) tokens FROM billing_calls WHERE user_id=CAST(:uid AS uuid) AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' GROUP BY scope"), {"uid": uid}).mappings().all()
     by_scope = {row["scope"]: row for row in calls}
+    account_requests = max(0, get_settings().paid_daily_request_limit - sum(row["requests"] for row in calls))
+    account_micros = max(0, _micros(get_settings().paid_daily_cost_limit) - sum(row["cost"] for row in calls))
+    result["account_remaining_requests"] = account_requests
+    result["account_remaining_cost_usd"] = account_micros / 1_000_000
     for row in policies:
         used = by_scope.get(row["scope"], {})
-        result["authorizations"].append({**dict(row), "remaining_requests": max(0, row["daily_requests"]-int(used.get("requests",0))), "remaining_cost_usd": max(0,row["daily_micros"]-int(used.get("cost",0)))/1_000_000})
+        result["authorizations"].append({
+            **dict(row),
+            "remaining_requests": min(account_requests, max(0, row["daily_requests"] - int(used.get("requests", 0)))),
+            "remaining_cost_usd": min(account_micros, max(0, row["daily_micros"] - int(used.get("cost", 0)))) / 1_000_000,
+        })
     result["requests_today"] = sum(row["requests"] for row in calls)
     result["reserved_cost_usd"] = sum(row["estimated"] for row in calls)/1_000_000
     result["consumed_cost_usd"] = sum(row["cost"] for row in calls)/1_000_000

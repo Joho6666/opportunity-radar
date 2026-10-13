@@ -125,7 +125,10 @@ def test_redis_queue_duplicate_job_contract(monkeypatch):
             second=await pool.enqueue_job("contract_only",_job_id=key)
             assert first is not None and second is None
             assert (await first.info()).function == "contract_only"
-        finally:await pool.aclose()
+        finally:
+            await pool.zrem("arq:queue",key)
+            await pool.delete("arq:job:"+key)
+            await pool.aclose()
     asyncio.run(run())
 
 

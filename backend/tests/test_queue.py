@@ -1,3 +1,4 @@
+from uuid import uuid4
 import asyncio
 from datetime import UTC, datetime, timedelta
 from app.repositories.memory import MemoryRepository
@@ -10,14 +11,16 @@ def test_enqueue_without_redis_runs_in_process():
     from app.repositories.factory import get_repository_singleton
 
     repo = get_repository_singleton()
-    user_id = "queue-user"
+    user_id = str(uuid4())
     repo.save_profile(user_id, ProfileUpsert(display_name="测试", skills=[{"name": "PPT", "level": "strong"}], goals=["client"]))
-    radar = repo.create_radar(user_id, RadarCreate(name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"],name="PPT", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
     run = repo.create_run(radar.id)
     result_status = asyncio.run(enqueue_radar_run(user_id, radar.id, run.id))
-    assert result_status is None or True
+    assert result_status is None
     saved = repo.get_run(user_id, run.id)
     assert saved.status == "completed"
+    assert saved.stats.items_found > 0
+    assert saved.stats.opportunities_found > 0
     assert repo.list_opportunities(user_id)
 
 
