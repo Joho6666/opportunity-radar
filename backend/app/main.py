@@ -12,8 +12,21 @@ async def lifespan(_: FastAPI):
     from .core.logging import configure_logging
 
     configure_logging()
+    _check_local_auth_mode()
     _wire_source_health()
     yield
+
+
+def _check_local_auth_mode() -> None:
+    """AUTH_DISABLED is for a single user on this machine; refuse it in production."""
+    settings = get_settings()
+    if not settings.auth_disabled:
+        return
+    if settings.app_env.lower() in {"production", "prod"}:
+        raise RuntimeError("AUTH_DISABLED=true is not allowed when APP_ENV is production")
+    import logging
+
+    logging.getLogger(__name__).warning("AUTH_DISABLED=true: login is off and only loopback requests are accepted. Local use only.")
 
 
 def _wire_source_health() -> None:

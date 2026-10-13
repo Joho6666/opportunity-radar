@@ -39,3 +39,22 @@ def test_high_engagement_does_not_create_buyer_signal():
     record = raw_items_to_evidence_batch(source="tikhub", query="AI视频广告", items=[item], batch_id="tikhub-2").items[0]
     assert record.category == "market"
     assert record.classification_source == "rule_v1"
+
+
+def test_rule_grade_survives_persistence():
+    from app.repositories.memory import MemoryRepository
+
+    texts = {
+        "buyer": "求推荐靠谱的外包团队做小程序，预算2万，月底前交付",
+        "content": "AI短视频怎么做？新手教程第一集",
+        "market": "AI广告案例：一张产品图生成短视频",
+    }
+    items = [
+        RawItem(external_id=key, title=text, content=text, url=f"https://www.tiktok.com/@u/video/{key}", source="tikhub", platform="tiktok")
+        for key, text in texts.items()
+    ]
+    batch = raw_items_to_evidence_batch(source="tiktok", query="q", items=items, batch_id="b1")
+    stored = {record.external_id: record for record in MemoryRepository().upsert_evidence_batch("u1", batch).records}
+    assert stored["buyer"].evidence_grade == "A"
+    assert stored["content"].evidence_grade == "B"
+    assert stored["market"].evidence_grade == "C"

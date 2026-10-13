@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 EvidenceCategory = Literal["buyer", "content", "market"]
+EvidenceGrade = Literal["A", "B", "C"]
 
 
 class EvidenceInput(BaseModel):
@@ -25,6 +26,7 @@ class EvidenceInput(BaseModel):
     payment_signal: str | None = Field(default=None, max_length=500)
     urgency_signal: str | None = Field(default=None, max_length=500)
     metadata: dict[str, str] = Field(default_factory=dict)
+    evidence_grade: EvidenceGrade = "C"
     classification_source: str = Field(default="unclassified", max_length=40)
     classification_reason: str = Field(default="", max_length=300)
     classification_confidence: float = Field(default=0.0, ge=0, le=1)

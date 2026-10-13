@@ -640,6 +640,8 @@ class PostgresRepository:
     def _evidence_from_row(self, row) -> EvidenceRecord:
         payload = dict(row)
         payload["evidence_id"] = str(payload.pop("id"))
+        if payload.get("converted_opportunity_id") is not None:
+            payload["converted_opportunity_id"] = str(payload["converted_opportunity_id"])
         payload.pop("user_id", None)
         payload.pop("created_at", None)
         return EvidenceRecord.model_validate(payload)
@@ -714,13 +716,40 @@ class PostgresRepository:
         return self._evidence_from_row(row)
 
     def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
-        evidence = self.get_evidence(user_id, evidence_id)
-        if evidence.verification_status != "verified" or evidence.category != "buyer":
-            raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
-        if evidence.converted_opportunity_id:
-            return self.get_opportunity(user_id, evidence.converted_opportunity_id)
-        saved = self.add_opportunity(item, user_id)
-        self.review_evidence(user_id, evidence_id, EvidenceReview(converted_opportunity_id=saved.id))
+        # One transaction with a row lock: concurrent conversions serialize, and the
+        # opportunity insert and evidence back-link commit (or roll back) together.
+        uid = as_uuid(user_id)
+        with self._conn() as conn:
+            row = conn.execute(
+                text("SELECT * FROM evidence_items WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid) FOR UPDATE"),
+                {"id": evidence_id, "uid": uid},
+            ).mappings().first()
+            if row is None:
+                raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+            evidence = self._evidence_from_row(row)
+            if evidence.verification_status != "verified" or evidence.category != "buyer":
+                raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
+            if evidence.converted_opportunity_id:
+                existing = conn.execute(
+                    text("SELECT * FROM opportunities WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"),
+                    {"id": evidence.converted_opportunity_id, "uid": uid},
+                ).mappings().first()
+            else:
+                # An opportunity left behind by an earlier half-finished conversion.
+                existing = conn.execute(
+                    text("SELECT * FROM opportunities WHERE user_id=CAST(:uid AS uuid) AND evidence_id=:eid"),
+                    {"uid": uid, "eid": evidence.evidence_id},
+                ).mappings().first()
+            if existing is not None:
+                saved = self._opportunity_from_row(conn, existing)
+            else:
+                self._ensure_user(conn, user_id)
+                self._upsert_opportunity(conn, item, uid)
+                saved = item
+            conn.execute(
+                text("UPDATE evidence_items SET converted_opportunity_id=CAST(:oid AS uuid) WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"),
+                {"oid": as_uuid(saved.id), "id": evidence_id, "uid": uid},
+            )
         return saved
 
     def review_evidence(self, user_id: str, evidence_id: str, review: EvidenceReview) -> EvidenceRecord:

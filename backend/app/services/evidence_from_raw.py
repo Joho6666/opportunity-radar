@@ -8,7 +8,11 @@ from .evidence_ingest import EvidenceBatch
 def raw_items_to_evidence_batch(*, source: str, query: str, items: list[RawItem], batch_id: str) -> EvidenceBatch:
     evidence = []
     for item in items:
-        classification = classify_tiktok(item.content or item.title, engagement=item.engagement)
+        title = (item.title or "").strip()
+        body = (item.content or "").strip()
+        # Keep the title with the text: for forum and RSS posts it often carries the request itself.
+        raw_text = f"{title}\n{body}" if title and body and title[:40] not in body else (body or title)
+        classification = classify_tiktok(body or title, title=title, engagement=item.engagement)
         metadata = {str(key): str(value) for key, value in (item.metadata or {}).items() if value is not None}
         metadata["engagement"] = str(item.engagement or {})
         evidence.append({
@@ -16,7 +20,7 @@ def raw_items_to_evidence_batch(*, source: str, query: str, items: list[RawItem]
             "source_platform": item.platform or "",
             "acquisition_tool": metadata.get("acquisition_tool", source),
             "url": item.url,
-            "raw_text": item.content or item.title,
+            "raw_text": raw_text,
             "query": query,
             "external_id": item.external_id,
             "published_at": item.published_at,
