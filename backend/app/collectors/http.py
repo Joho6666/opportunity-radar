@@ -6,6 +6,7 @@ import socket
 from collections import defaultdict
 from urllib.parse import urlparse
 import httpx
+from ..core.config import get_settings
 from ..core.errors import AppError
 
 USER_AGENT = "OpportunityRadar/0.2 (+https://github.com/Joho6666/opportunity-radar)"
@@ -24,6 +25,8 @@ PRIVATE_NETWORKS = (
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("2001:db8::/32"),
 )
+# Proxies in fake-IP mode (Clash/Mihomo TUN, Surge, ...) answer every DNS query from this range.
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 
 
 def _is_blocked_ip(address: str) -> bool:
@@ -50,8 +53,13 @@ def validate_public_url(url: str, resolver=socket.getaddrinfo) -> str:
         answers = resolver(host, None)
     except OSError as exc:
         raise AppError("BLOCKED_HOST", "无法解析该主机。", 400) from exc
+    allow_fake_ip = get_settings().allow_fake_ip_dns
     for family, _type, _proto, _canon, sockaddr in answers:
         address = sockaddr[0]
+        if allow_fake_ip and ipaddress.ip_address(address) in FAKE_IP_NETWORK:
+            # Opt-in for a local fake-IP proxy. Only DNS answers are trusted; a literal
+            # 198.18.x.x host is still rejected above.
+            continue
         if _is_blocked_ip(address):
             raise AppError("BLOCKED_HOST", "拒绝访问环回、私有或保留地址。", 400)
     return host

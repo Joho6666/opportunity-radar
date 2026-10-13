@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from .base import CollectorCapabilities, SourceAdapter
 from .http import fetcher, validate_public_url
+from .text import clean_text
 from ..core.config import get_settings
 from ..core.errors import AppError
 from ..schemas.domain import RawItem
@@ -30,8 +31,8 @@ class RssCollector(SourceAdapter):
             parsed = feedparser.parse(response.text) if feedparser else {"entries": []}
             for entry in parsed.get("entries", [])[:10]:
                 url = entry.get("link") or feed_url
-                title = entry.get("title") or url
-                content = entry.get("summary") or entry.get("description") or title
+                title = clean_text(entry.get("title")) or url
+                content = clean_text(entry.get("summary") or entry.get("description")) or title
                 if query and query.lower() not in f"{title} {content}".lower() and not query.startswith("http"):
                     continue
                 items.append(

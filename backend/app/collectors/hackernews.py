@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 from .base import CollectorCapabilities, SourceAdapter
 from .http import fetcher
+from .text import clean_text
 from ..schemas.domain import RawItem
 
 
@@ -14,13 +15,14 @@ class HackerNewsCollector(SourceAdapter):
     async def search(self, query: str) -> list[RawItem]:
         q = quote(query.strip())
         tags = "show_hn" if not query.strip() or "show hn" in query.lower() else "story"
-        payload = await fetcher.get_json(f"https://hn.algolia.com/api/v1/search?query={q}&tags={tags}&hitsPerPage=10")
+        # search_by_date: newest first. Relevance order surfaced decade-old threads as "new" evidence.
+        payload = await fetcher.get_json(f"https://hn.algolia.com/api/v1/search_by_date?query={q}&tags={tags}&hitsPerPage=10")
         items: list[RawItem] = []
         for hit in payload.get("hits", []):
             object_id = str(hit.get("objectID") or "")
             url = hit.get("url") or f"https://news.ycombinator.com/item?id={object_id}"
-            title = hit.get("title") or url
-            content = hit.get("story_text") or hit.get("comment_text") or title
+            title = clean_text(hit.get("title")) or url
+            content = clean_text(hit.get("story_text") or hit.get("comment_text")) or title
             published = hit.get("created_at")
             updated = hit.get("updated_at")
             items.append(

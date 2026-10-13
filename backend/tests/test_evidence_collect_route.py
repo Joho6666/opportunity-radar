@@ -99,3 +99,26 @@ def test_empty_success_and_provider_failure_are_explicit(monkeypatch):
     assert failed_response.status_code == 502
     assert failed_response.json()["error"]["code"] == "COLLECTOR_FAILED"
     assert "secret provider detail" not in str(failed_response.json())
+
+
+def test_collect_drops_stale_posts_and_requires_confirmation_for_domestic_sources(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    items = [
+        RawItem(external_id="new", title="t", content="找人做小程序，预算 3000，月底交付", url="https://example.test/new", source="douyin", platform="douyin", published_at=now - timedelta(days=2)),
+        RawItem(external_id="old", title="t", content="2019 年的老帖子，内容足够长", url="https://example.test/old", source="douyin", platform="douyin", published_at=now - timedelta(days=400)),
+        RawItem(external_id="undated", title="t", content="没有发布时间的帖子也保留", url="https://example.test/undated", source="douyin", platform="douyin"),
+    ]
+    repository, fake_search = _setup(monkeypatch, items, tikhub_key="k")
+    client = TestClient(app)
+    try:
+        refused = client.post("/api/intelligence/evidence/collect?source=douyin&query=剪辑", json={"manual_confirmed": False})
+        response = client.post("/api/intelligence/evidence/collect?source=douyin&query=剪辑", json={"manual_confirmed": True})
+    finally:
+        app.dependency_overrides.clear()
+    assert refused.status_code == 400 and refused.json()["error"]["code"] == "MANUAL_CONFIRMATION_REQUIRED"
+    body = response.json()
+    assert body["fetched"] == 3 and body["stale"] == 1 and body["inserted"] == 2
+    assert {r["external_id"] for r in body["records"]} == {"new", "undated"}
+    assert fake_search.calls == [("douyin", "剪辑")]

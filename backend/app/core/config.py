@@ -18,8 +18,12 @@ class Settings(BaseSettings):
     firecrawl_api_key: str = ""
     github_token: str = ""
     tikhub_api_key: str = ""
+    # api.tikhub.dev is TikHub's mainland-China endpoint; api.tikhub.io works through a proxy.
+    tikhub_base_url: str = "https://api.tikhub.io"
     rss_feeds: str = "https://hnrss.org/newest,https://github.blog/feed/"
     redis_url: str = ""
+    # Trust 198.18.0.0/15 DNS answers from a local fake-IP proxy (Clash/Mihomo TUN). Local use only.
+    allow_fake_ip_dns: bool = False
     cors_origins: str = "http://127.0.0.1:3001,http://localhost:3000"
     use_in_memory_store: bool = True
     # Money Intelligence settings

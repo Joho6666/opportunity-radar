@@ -11,7 +11,7 @@ class TikHubCollector(SourceAdapter):
     """Minimal TikTok public-search adapter backed by TikHub."""
 
     slug = "tikhub"
-    endpoint = "https://api.tikhub.io/api/v1/tiktok/web/fetch_general_search"
+    path = "/api/v1/tiktok/web/fetch_general_search"
 
     def capabilities(self) -> CollectorCapabilities:
         return CollectorCapabilities(search=True, timeline=False, comments=False, detail=True, historical=False, realtime=False)
@@ -23,8 +23,9 @@ class TikHubCollector(SourceAdapter):
             raise RuntimeError("TIKHUB_QUERY_REQUIRED")
         if not settings.tikhub_api_key:
             raise RuntimeError("TIKHUB_API_KEY is not configured")
+        endpoint = settings.tikhub_base_url.rstrip("/") + self.path
         payload = await fetcher.get_json(
-            self.endpoint + "?" + urlencode({"keyword": query.strip(), "offset": 0}),
+            endpoint + "?" + urlencode({"keyword": query.strip(), "offset": 0}),
             headers={"Authorization": f"Bearer {settings.tikhub_api_key}", "Accept": "application/json"},
         )
         if payload.get("code") not in (None, 200):
@@ -61,7 +62,7 @@ class TikHubCollector(SourceAdapter):
                     "nickname": author.get("nickname", ""),
                     "acquisition_tool": "tikhub",
                     "original_platform": "tiktok",
-                    "provider_endpoint": self.endpoint,
+                    "provider_endpoint": endpoint,
                 },
             ))
         return items

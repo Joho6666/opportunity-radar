@@ -57,6 +57,7 @@ def test_hackernews_collector_maps_raw_items(monkeypatch):
 def test_tikhub_collector_maps_tiktok_search(monkeypatch):
     class Settings:
         tikhub_api_key = "test-token"
+        tikhub_base_url = "https://api.tikhub.io"
 
     async def fake_json(url, **kwargs):
         assert "keyword=AI" in url
@@ -101,3 +102,28 @@ def test_plan_queries_uses_selected_sources():
     assert queries
     assert {item.source for item in queries} <= {"github", "hackernews"}
     assert "github" in {item.source for item in queries}
+
+
+def _fake_ip_resolver(host, port):
+    return [(2, 1, 6, "", ("198.18.0.97", 0))]
+
+
+def test_fake_ip_dns_answer_is_blocked_by_default(monkeypatch):
+    from app.collectors import http as http_mod
+    from app.core.config import Settings
+
+    monkeypatch.setattr(http_mod, "get_settings", lambda: Settings(allow_fake_ip_dns=False))
+    with pytest.raises(AppError):
+        validate_public_url("https://api.github.com/search", resolver=_fake_ip_resolver)
+
+
+def test_fake_ip_opt_in_trusts_dns_answers_but_not_literal_hosts(monkeypatch):
+    from app.collectors import http as http_mod
+    from app.core.config import Settings
+
+    monkeypatch.setattr(http_mod, "get_settings", lambda: Settings(allow_fake_ip_dns=True))
+    assert validate_public_url("https://api.github.com/search", resolver=_fake_ip_resolver) == "api.github.com"
+    with pytest.raises(AppError):
+        validate_public_url("http://198.18.0.97/secret", resolver=_fake_ip_resolver)
+    with pytest.raises(AppError):
+        validate_public_url("http://127.0.0.1/secret")
