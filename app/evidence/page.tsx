@@ -1,160 +1,415 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, ChevronDown, ExternalLink, FileJson, Loader2, RefreshCw, Upload } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, ArrowRight, Check, ChevronDown, ExternalLink, FileJson, Loader2, RefreshCw, RotateCcw, Search, Upload, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Button, EmptyState, PageHeader, Panel } from "@/components/ui";
+import { cn } from "@/lib/utils";
+import { useOpportunityStore } from "@/stores/use-opportunity-store";
 import {
   EVIDENCE_CATEGORIES,
+  BILLABLE_SOURCES,
   EVIDENCE_SOURCES,
+  FEED_PRESETS,
+  SOURCE_LABELS,
   collectEvidence,
+  convertEvidence,
   fetchEvidence,
   fetchEvidenceRuntime,
   parseEvidenceImport,
-  uploadEvidence,
   reviewEvidence,
-  convertEvidence,
+  uploadEvidence,
   type EvidenceCategory,
   type EvidenceRecord,
+  type EvidenceReviewInput,
   type EvidenceRuntime,
   type EvidenceSource,
 } from "@/lib/evidence-client";
-
-const labels: Record<EvidenceCategory, string> = {
-  buyer: "潜在购买需求",
-  content: "内容问题",
-  market: "市场变化",
-};
+import {
+  CATEGORY_LABELS,
+  STATUS_FILTERS,
+  STATUS_META,
+  authorOf,
+  countBy,
+  draftOpportunity,
+  gradeOf,
+  parseBudget,
+  reasonLabel,
+  sourceOf,
+  sourcesIn,
+  statusOf,
+  visibleRecords,
+  type ReviewStatus,
+  type SortMode,
+  type StatusFilter,
+} from "@/lib/evidence-view";
 
 const descriptions: Record<EvidenceCategory, string> = {
-  buyer: "原文出现找人、预算、报价或交付意图的候选信号。",
-  content: "适合转成教程、选题或服务内容的问题。",
-  market: "竞品案例、平台变化、广告趋势和供给侧信息。",
+  buyer: "有人想找人、给预算或要交付，值得优先看。",
+  content: "受众在提问或求教程，适合做内容。",
+  market: "案例、趋势、卖方自荐，了解行情用。",
 };
 
-function classificationLabel(record: EvidenceRecord) {
-  if (record.classification_source === "rule_v1") return "规则分类";
-  if (record.classification_source === "manual") return "人工分类";
-  return "未分类";
-}
+const GRADE_TONE = {
+  A: "border-signal/50 bg-signal/10 text-signal",
+  B: "border-ai/50 bg-ai/10 text-indigo-200",
+  C: "border-line bg-ink/60 text-muted",
+};
 
-function formatDate(value: string | null) {
-  if (!value) return "未提供";
+type Toast = { message: string; href?: string; undo?: () => Promise<void> };
+
+function shortDate(value: string | null | undefined) {
+  if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function formatEngagement(record: EvidenceRecord) {
+function engagementOf(record: EvidenceRecord): string | null {
   const raw = record.metadata?.engagement;
   if (!raw) return null;
   try {
-    const value = typeof raw === "string" ? JSON.parse(raw) as Record<string, unknown> : raw as Record<string, unknown>;
+    // Older collectors stored a Python repr ("{'likes': 1, 'plays': None}").
+    const value = (typeof raw === "string" ? JSON.parse(raw.replace(/'/g, '"').replace(/\bNone\b/g, "null")) : raw) as Record<string, unknown>;
     const labels: Record<string, string> = { plays: "播放", likes: "点赞", comments: "评论", shares: "分享" };
-    return Object.entries(labels)
-      .filter(([key]) => value[key] !== undefined && value[key] !== null)
-      .map(([key, label]) => `${label} ${Number(value[key]).toLocaleString("zh-CN")}`)
-      .join(" · ");
+    const parts = Object.entries(labels)
+      .filter(([key]) => typeof value[key] === "number" && (value[key] as number) > 0)
+      .map(([key, label]) => `${label} ${(value[key] as number).toLocaleString("zh-CN")}`);
+    return parts.length ? parts.join(" · ") : null;
   } catch {
     return null;
   }
 }
 
-function EvidenceCard({ record, onReview, onConvert }: { record: EvidenceRecord; onReview: (id: string, input: Record<string, unknown>) => Promise<void>; onConvert: (id: string, input: Record<string, unknown>) => Promise<void> }) {
-  const engagement = formatEngagement(record);
+function isTyping(target: EventTarget | null) {
+  const element = target as HTMLElement | null;
+  return !!element && (element.tagName === "INPUT" || element.tagName === "TEXTAREA" || element.tagName === "SELECT" || element.isContentEditable);
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="mono inline-flex min-w-5 items-center justify-center rounded border border-line bg-ink px-1 text-[10px] leading-4 text-muted">{children}</kbd>;
+}
+
+function ConvertForm({ record, onCancel, onSubmit }: { record: EvidenceRecord; onCancel: () => void; onSubmit: (input: EvidenceReviewInput) => Promise<void> }) {
+  const draft = useMemo(() => draftOpportunity(record), [record]);
+  const [title, setTitle] = useState(draft.title);
+  const [summary, setSummary] = useState(draft.summary);
+  const [low, setLow] = useState("");
+  const [high, setHigh] = useState("");
+  const [busy, setBusy] = useState(false);
+  const titleInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { titleInput.current?.select(); }, []);
+
+  const min = parseBudget(low);
+  const max = parseBudget(high);
+  const budgetError = min === "invalid" || max === "invalid"
+    ? "预算请填整数（元），不知道就留空"
+    : (min === null) !== (max === null)
+      ? "预算上下限要么都填，要么都空"
+      : min !== null && max !== null && min > max ? "上限不能小于下限" : null;
+  const ready = title.trim() && summary.trim() && !budgetError && !busy;
+
+  async function submit() {
+    if (!ready) return;
+    setBusy(true);
+    try { await onSubmit({ title: title.trim(), summary: summary.trim(), budget_min: min as number | null, budget_max: max as number | null }); }
+    finally { setBusy(false); }
+  }
+
   return (
-    <article className="rounded-xl border border-line bg-panel/80 p-5 transition hover:border-indigo-400/40 hover:bg-panel">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-indigo-400/10 px-2.5 py-1 text-xs font-medium text-indigo-200">{labels[record.category]}</span>
-            <span className="rounded-full bg-amber-400/10 px-2.5 py-1 text-xs text-amber-200">未核实</span>
-            <span className="rounded-full border border-line px-2.5 py-1 text-xs text-muted">{classificationLabel(record)}</span>
+    <form
+      className="mt-4 space-y-3 rounded-lg border border-signal/30 bg-signal/[0.04] p-4"
+      onSubmit={(event) => { event.preventDefault(); void submit(); }}
+      onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onCancel(); } }}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-mist">转为机会 <span className="ml-1 text-xs font-normal text-muted">已按原文预填，可直接修改</span></p>
+        <button type="button" onClick={onCancel} className="text-muted hover:text-mist" aria-label="取消转换"><X size={16} /></button>
+      </div>
+      <input ref={titleInput} aria-label="机会标题" value={title} onChange={(event) => setTitle(event.target.value.slice(0, 200))} className="w-full rounded border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-signal/60" />
+      <textarea aria-label="机会摘要" value={summary} onChange={(event) => setSummary(event.target.value.slice(0, 2000))} rows={2} className="w-full resize-y rounded border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-signal/60" />
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-xs text-muted">预算（元，可留空）</span>
+        <input aria-label="预算下限" inputMode="numeric" value={low} onChange={(event) => setLow(event.target.value)} placeholder="下限" className="w-24 rounded border border-line bg-ink px-2 py-1.5 text-mist outline-none focus:border-signal/60" />
+        <span className="text-muted">–</span>
+        <input aria-label="预算上限" inputMode="numeric" value={high} onChange={(event) => setHigh(event.target.value)} placeholder="上限" className="w-24 rounded border border-line bg-ink px-2 py-1.5 text-mist outline-none focus:border-signal/60" />
+        {budgetError && <span className="text-xs text-amber-200">{budgetError}</span>}
+        <Button type="submit" disabled={!ready} className="ml-auto bg-signal/90 text-ink hover:bg-signal">
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}确认转为机会 <Kbd>Enter</Kbd>
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function EvidenceRow({ record, selected, converting, onSelect, onReview, onStartConvert, onCancelConvert, onConvert }: {
+  record: EvidenceRecord;
+  selected: boolean;
+  converting: boolean;
+  onSelect: () => void;
+  onReview: (input: EvidenceReviewInput) => Promise<void>;
+  onStartConvert: () => void;
+  onCancelConvert: () => void;
+  onConvert: (input: EvidenceReviewInput) => Promise<void>;
+}) {
+  const status = statusOf(record);
+  const grade = gradeOf(record);
+  const engagement = engagementOf(record);
+  const src = sourceOf(record);
+  const author = authorOf(record);
+  const savedNotes = String(record.notes ?? "");
+  const [notes, setNotes] = useState(savedNotes);
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { setNotes(savedNotes); }, [savedNotes]);
+  const long = record.raw_text.length > 280;
+  const converted = typeof record.converted_opportunity_id === "string" && record.converted_opportunity_id;
+  const urgency = typeof record.urgency_signal === "string" ? record.urgency_signal : null;
+  const confidence = typeof record.classification_confidence === "number" ? Math.round(record.classification_confidence * 100) : null;
+  const published = shortDate(record.published_at) ?? shortDate(record.captured_at);
+
+  return (
+    <article
+      id={`evidence-${record.evidence_id}`}
+      onClick={onSelect}
+      className={cn(
+        "relative cursor-default rounded-lg border bg-panel/70 p-4 pl-5 transition",
+        selected ? "border-ai/60 bg-panel shadow-glow" : "border-line hover:border-slate-500",
+      )}
+    >
+      <span className={cn("absolute inset-y-3 left-0 w-0.5 rounded-full transition", selected ? "bg-ai" : "bg-transparent")} />
+      <div className="flex gap-4">
+        <div title={`证据等级 ${grade}`} className={cn("mono flex h-10 w-10 shrink-0 items-center justify-center rounded-md border text-lg font-semibold", GRADE_TONE[grade])}>{grade}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span className={cn("rounded-full border px-2 py-0.5", STATUS_META[status].tone)}>{STATUS_META[status].label}</span>
+            <span className="text-slate-300">{reasonLabel(record.classification_reason)}</span>
+            {confidence !== null && <span className="mono text-muted">置信 {confidence}%</span>}
+            <span className="ml-auto flex items-center gap-2 text-muted">
+              <span className={cn("rounded-full border px-2 py-0.5 font-medium", src.tone)}>{src.label}</span>
+              {author && <span className="max-w-32 truncate" title={`作者：${author}`}>@{author}</span>}
+              {published && <span className="mono">{published}</span>}
+              <a href={record.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="inline-flex items-center gap-1 text-indigo-200 hover:text-white">原文 <ExternalLink size={12} /></a>
+              <button type="button" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(record.url).then(() => setCopied(true)); setTimeout(() => setCopied(false), 1500); }} className="text-muted hover:text-mist">{copied ? "已复制" : "复制链接"}</button>
+            </span>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-            <span className="font-medium text-mist">{record.source_platform || record.source}</span>
-            {record.acquisition_tool && <span className="text-xs text-muted">采集：{record.acquisition_tool}</span>}
+          <p className={cn("mt-2 whitespace-pre-line text-[15px] leading-7 text-slate-100", !selected ? "line-clamp-2" : !expanded && "line-clamp-6")}>{record.raw_text}</p>
+          {selected && long && <button type="button" onClick={(event) => { event.stopPropagation(); setExpanded((value) => !value); }} className="mt-1 text-xs text-indigo-200 hover:text-white">{expanded ? "收起" : "展开全文"}</button>}
+          {(record.payment_signal || urgency || engagement) && (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+              {record.payment_signal && <span>付款信号 <b className="font-medium text-signal">{record.payment_signal}</b></span>}
+              {urgency && <span>紧急 <b className="font-medium text-amber-200">{urgency}</b></span>}
+              {engagement && <span>{engagement}</span>}
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+            {status !== "verified"
+              ? <Button variant="secondary" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "verified" })}><Check size={13} />核实 {selected && <Kbd>V</Kbd>}</Button>
+              : <Button variant="ghost" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "unverified" })}><RotateCcw size={13} />退回待复核</Button>}
+            {status !== "invalidated" && <Button variant="secondary" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "invalidated" })}><X size={13} />排除 {selected && <Kbd>X</Kbd>}</Button>}
+            {status === "invalidated" && <Button variant="ghost" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "unverified" })}><RotateCcw size={13} />恢复</Button>}
+            <select aria-label="修正分类" value={record.category} onChange={(event) => void onReview({ category: event.target.value as EvidenceCategory })} className="h-8 rounded border border-line bg-ink px-2 text-xs text-mist">
+              {EVIDENCE_CATEGORIES.map((item, index) => <option key={item} value={item}>{index + 1} · {CATEGORY_LABELS[item]}</option>)}
+            </select>
+            <input
+              aria-label="复核备注"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value.slice(0, 2000))}
+              onBlur={() => { if (notes !== savedNotes) void onReview({ notes }); }}
+              onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+              placeholder="备注（离开输入框自动保存）"
+              className="h-8 min-w-40 flex-1 rounded border border-line bg-ink px-2 text-xs text-mist outline-none focus:border-ai"
+            />
+            {record.category === "buyer" && !converted && status !== "invalidated" && !converting && (
+              <Button className="min-h-8 px-2.5 text-xs" onClick={onStartConvert}>
+                <ArrowRight size={13} />{status === "verified" ? "转为机会" : "核实并转为机会"} {selected && <Kbd>C</Kbd>}
+              </Button>
+            )}
+            {converted && <Link href={`/opportunities/${converted}`} className="inline-flex h-8 items-center gap-1 rounded border border-signal/40 px-2.5 text-xs text-signal hover:bg-signal/10">已转为机会 · 查看 <ArrowRight size={12} /></Link>}
           </div>
+          {converting && <ConvertForm record={record} onCancel={onCancelConvert} onSubmit={onConvert} />}
         </div>
-        <a className="inline-flex shrink-0 items-center gap-1.5 rounded border border-line px-3 py-2 text-xs text-indigo-200 transition hover:border-indigo-300 hover:text-white" href={record.url} target="_blank" rel="noreferrer">
-          查看原文 <ExternalLink size={13} />
-        </a>
       </div>
-
-      <p className="mt-4 text-[15px] leading-7 text-slate-200">{record.raw_text}</p>
-
-      <div className="mt-5 grid gap-3 border-t border-line pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
-        <div><p className="text-muted">分类理由</p><p className="mt-1 text-slate-300">{record.classification_reason || "未记录"}</p></div>
-        <div><p className="text-muted">发布时间</p><p className="mt-1 text-slate-300">{formatDate(record.published_at)}</p></div>
-        <div><p className="text-muted">采集时间</p><p className="mt-1 text-slate-300">{formatDate(record.captured_at)}</p></div>
-        <div><p className="text-muted">付款信号</p><p className="mt-1 text-signal">{record.payment_signal ?? "未发现"}</p></div>
-      </div>
-      {engagement && <p className="mt-3 text-xs text-muted">互动数据：<span className="text-slate-300">{engagement}</span></p>}
-      <EvidenceReviewControls record={record} onReview={onReview} onConvert={onConvert} />
     </article>
   );
 }
 
-function EvidenceReviewControls({ record, onReview, onConvert }: { record: EvidenceRecord; onReview: (id: string, input: Record<string, unknown>) => Promise<void>; onConvert: (id: string, input: Record<string, unknown>) => Promise<void> }) {
-  const [notes, setNotes] = useState(String(record.notes ?? ""));
-  const [busy, setBusy] = useState(false);
-  const [title, setTitle] = useState("");
-  const [summary, setSummary] = useState("");
-  async function run(action: () => Promise<void>) { setBusy(true); try { await action(); } finally { setBusy(false); } }
-  return <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
-    <select aria-label="修正分类" value={record.category} disabled={busy} onChange={(event) => void run(() => onReview(record.evidence_id, { category: event.target.value }))} className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist">{EVIDENCE_CATEGORIES.map((item) => <option key={item} value={item}>{labels[item]}</option>)}</select>
-    <input aria-label="复核备注" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="复核备注" maxLength={2000} className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist" />
-    <Button disabled={busy} variant="secondary" onClick={() => void run(() => onReview(record.evidence_id, { notes }))}>保存备注</Button>
-    <Button disabled={busy} variant="secondary" onClick={() => void run(() => onReview(record.evidence_id, { verification_status: "verified", notes }))}>人工核实</Button>
-    <Button disabled={busy} variant="secondary" onClick={() => void run(() => onReview(record.evidence_id, { verification_status: "invalidated", notes }))}>排除</Button>
-    {record.verification_status === "verified" && record.category === "buyer" && <><input aria-label="机会标题" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="机会标题（必填）" className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist" /><input aria-label="机会摘要" value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="机会摘要（必填）" className="rounded border border-line bg-ink px-2 py-1 text-xs text-mist" /><Button disabled={busy || !title.trim() || !summary.trim()} onClick={() => void run(() => onConvert(record.evidence_id, { title, summary, budget_min: null, budget_max: null }))}>转为机会</Button></>}
-    {busy && <Loader2 className="animate-spin" size={16} />}
-  </div>;
-}
-
 function EvidenceInbox() {
-  const [category, setCategory] = useState<EvidenceCategory>("market");
   const [records, setRecords] = useState<EvidenceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [importText, setImportText] = useState("");
-  const [importState, setImportState] = useState<string | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importing, setImporting] = useState(false);
+  const [category, setCategory] = useState<EvidenceCategory>("buyer");
+  const [status, setStatus] = useState<StatusFilter>("pending");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortMode>("grade");
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
   const [runtime, setRuntime] = useState<EvidenceRuntime | null>(null);
-  const [source, setSource] = useState<EvidenceSource>("github");
+  const [collectorOpen, setCollectorOpen] = useState(false);
+  const [source, setSource] = useState<EvidenceSource>("rss");
   const [query, setQuery] = useState("");
   const [manualConfirmed, setManualConfirmed] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [collectState, setCollectState] = useState<string | null>(null);
-  const [actionState, setActionState] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importState, setImportState] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordsRef = useRef<EvidenceRecord[]>([]);
+  useEffect(() => { recordsRef.current = records; }, [records]);
+
+  const visible = useMemo(() => visibleRecords(records, { category, status, search, sort, source: sourceFilter, keep: convertingId }), [records, category, status, search, sort, sourceFilter, convertingId]);
+  const sources = useMemo(() => sourcesIn(records, category), [records, category]);
+  const counts = useMemo(() => Object.fromEntries(EVIDENCE_CATEGORIES.map((item) => [item, countBy(records, item)])) as Record<EvidenceCategory, ReturnType<typeof countBy>>, [records]);
+  const selected = visible.find((record) => record.evidence_id === selectedId) ?? null;
+
+  const showToast = useCallback((next: Toast | null) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(next);
+    if (next) toastTimer.current = setTimeout(() => setToast(null), next.undo ? 8000 : 4000);
+  }, []);
+  const holdToast = () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
+  const releaseToast = () => { toastTimer.current = setTimeout(() => setToast(null), 3000); };
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nextRecords, nextRuntime] = await Promise.all([
-        Promise.all(EVIDENCE_CATEGORIES.map((item) => fetchEvidence(item, 500))).then((groups) => groups.flat()),
+      const [groups, nextRuntime] = await Promise.all([
+        Promise.all(EVIDENCE_CATEGORIES.map((item) => fetchEvidence(item, 500))),
         fetchEvidenceRuntime(),
       ]);
-      setRecords(nextRecords);
+      const next = groups.flat();
+      setRecords(next);
       setRuntime(nextRuntime);
+      if (!next.length) setCollectorOpen(true);
+    } catch (reason) {
+      setRecords([]);
+      setError(reason instanceof Error ? reason.message : "加载证据失败");
+    } finally {
+      setLoading(false);
     }
-    catch (reason) { setRecords([]); setError(reason instanceof Error ? reason.message : "加载证据失败"); }
-    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
 
+  // Keep a selection inside the visible list so the keyboard always has a target.
+  useEffect(() => {
+    if (!visible.length) { if (selectedId !== null) setSelectedId(null); return; }
+    if (!selected) setSelectedId(visible[0].evidence_id);
+  }, [visible, selected, selectedId]);
+
+  // Follow the selection only once the user starts moving it; the first auto-selection on load
+  // must not scroll the header and filters out of view.
+  const previousSelection = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedId && previousSelection.current !== null) document.getElementById(`evidence-${selectedId}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    previousSelection.current = selectedId;
+  }, [selectedId]);
+
+  /** Replace one record in place; if it left the current view, select whatever took its slot. */
+  const applyRecord = useCallback((updated: EvidenceRecord, keepBefore: string | null = convertingId, keepAfter: string | null = keepBefore) => {
+    const current = recordsRef.current;
+    const next = current.map((record) => record.evidence_id === updated.evidence_id ? { ...record, ...updated } : record);
+    const options = { category, status, search, sort, source: sourceFilter };
+    const before = visibleRecords(current, { ...options, keep: keepBefore });
+    const after = visibleRecords(next, { ...options, keep: keepAfter });
+    recordsRef.current = next;
+    setRecords(next);
+    if (!after.some((record) => record.evidence_id === updated.evidence_id)) {
+      const index = before.findIndex((record) => record.evidence_id === updated.evidence_id);
+      setSelectedId(after[Math.min(Math.max(index, 0), after.length - 1)]?.evidence_id ?? null);
+    }
+  }, [category, status, search, sort, sourceFilter, convertingId]);
+
+  const review = useCallback(async (record: EvidenceRecord, input: EvidenceReviewInput) => {
+    const previous: ReviewStatus = statusOf(record);
+    try {
+      applyRecord(await reviewEvidence(record.evidence_id, input));
+      if (input.verification_status && input.verification_status !== previous) {
+        const label = input.verification_status === "verified" ? "已核实" : input.verification_status === "invalidated" ? "已排除" : "已退回待复核";
+        showToast({
+          message: `${label}：${record.raw_text.slice(0, 24)}${record.raw_text.length > 24 ? "…" : ""}`,
+          undo: async () => { applyRecord(await reviewEvidence(record.evidence_id, { verification_status: previous })); showToast({ message: "已撤销" }); },
+        });
+      } else if (input.category) {
+        showToast({ message: `已移到「${CATEGORY_LABELS[input.category]}」` });
+      } else if (input.notes !== undefined) {
+        showToast({ message: "备注已保存" });
+      }
+    } catch (reason) {
+      showToast({ message: reason instanceof Error ? reason.message : "复核失败" });
+    }
+  }, [applyRecord, showToast]);
+
+  const startConvert = useCallback(async (record: EvidenceRecord) => {
+    // Pin the record first so verifying it does not pull it out of the pending view.
+    setSelectedId(record.evidence_id);
+    setConvertingId(record.evidence_id);
+    if (statusOf(record) !== "verified") {
+      try { applyRecord(await reviewEvidence(record.evidence_id, { verification_status: "verified" }), record.evidence_id); }
+      catch (reason) { setConvertingId(null); showToast({ message: reason instanceof Error ? reason.message : "核实失败" }); }
+    }
+  }, [applyRecord, showToast]);
+
+  const convert = useCallback(async (record: EvidenceRecord, input: EvidenceReviewInput) => {
+    try {
+      const opportunity = await convertEvidence(record.evidence_id, input);
+      const id = String(opportunity.id ?? "");
+      setConvertingId(null);
+      applyRecord({ ...record, verification_status: "verified", converted_opportunity_id: id }, record.evidence_id, null);
+      void useOpportunityStore.getState().hydrate(true);
+      showToast({ message: `已转为机会：${input.title}`, href: id ? `/opportunities/${id}` : "/opportunities" });
+    } catch (reason) {
+      showToast({ message: reason instanceof Error ? reason.message : "转换失败" });
+    }
+  }, [applyRecord, showToast]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "/" && !isTyping(event.target)) { event.preventDefault(); searchInput.current?.focus(); return; }
+      if (isTyping(event.target) || convertingId) return;
+      const index = visible.findIndex((record) => record.evidence_id === selectedId);
+      const key = event.key.toLowerCase();
+      if (key === "j" || event.key === "ArrowDown") { event.preventDefault(); setSelectedId(visible[Math.min(index + 1, visible.length - 1)]?.evidence_id ?? null); return; }
+      if (key === "k" || event.key === "ArrowUp") { event.preventDefault(); setSelectedId(visible[Math.max(index - 1, 0)]?.evidence_id ?? null); return; }
+      if (!selected) return;
+      if (key === "v") void review(selected, { verification_status: "verified" });
+      else if (key === "x") void review(selected, { verification_status: "invalidated" });
+      else if (key === "u") void review(selected, { verification_status: "unverified" });
+      else if (key === "o") window.open(selected.url, "_blank", "noreferrer");
+      else if (key === "c" && selected.category === "buyer" && !selected.converted_opportunity_id) void startConvert(selected);
+      else if (["1", "2", "3"].includes(key)) {
+        const target = EVIDENCE_CATEGORIES[Number(key) - 1];
+        if (target !== selected.category) void review(selected, { category: target });
+      } else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [visible, selected, selectedId, convertingId, review, startConvert]);
+
   async function collect() {
     if (!query.trim()) { setCollectState("请先填写搜索词"); return; }
-    setCollecting(true); setCollectState(null);
+    setCollecting(true);
+    setCollectState(null);
     try {
       const result = await collectEvidence(source, query.trim(), manualConfirmed);
       setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，拒绝 ${result.rejected} 条`);
       await load();
-    } catch (reason) { setCollectState(reason instanceof Error ? reason.message : "采集失败"); }
-    finally { setCollecting(false); }
+    } catch (reason) {
+      setCollectState(reason instanceof Error ? reason.message : "采集失败");
+    } finally {
+      setCollecting(false);
+    }
   }
 
   async function importEvidence() {
@@ -167,12 +422,12 @@ function EvidenceInbox() {
       setImportState(`已新增 ${result.inserted} 条，重复 ${result.duplicates} 条`);
       setImportOpen(false);
       await load();
-    } catch (reason) { setImportState(reason instanceof Error ? reason.message : "导入失败"); }
-    finally { setImporting(false); }
+    } catch (reason) {
+      setImportState(reason instanceof Error ? reason.message : "导入失败");
+    } finally {
+      setImporting(false);
+    }
   }
-
-  async function review(id: string, input: Record<string, unknown>) { setActionState(null); try { await reviewEvidence(id, input); await load(); } catch (reason) { setActionState(reason instanceof Error ? reason.message : "复核失败"); } }
-  async function convert(id: string, input: Record<string, unknown>) { setActionState(null); try { await convertEvidence(id, input); setActionState("已转为机会"); await load(); } catch (reason) { setActionState(reason instanceof Error ? reason.message : "转换失败"); } }
 
   async function readFile(file: File) {
     setImportState(null);
@@ -180,49 +435,121 @@ function EvidenceInbox() {
     catch { setImportState("无法读取该文件"); }
   }
 
+  const billable = BILLABLE_SOURCES.has(source);
+
   return (
     <>
       <PageHeader
         title="证据收件箱"
-        description="先收集事实，再人工判断是否值得行动。所有自动分类默认未核实。"
-        action={<div className="flex gap-2"><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> 刷新</Button><Button onClick={() => setImportOpen((value) => !value)}><Upload size={15} /> 导入</Button></div>}
+        description="先收集事实，再人工判断是否值得行动。处理过的证据会自动离开待复核队列。"
+        action={<div className="flex gap-2">
+          <Button variant="secondary" className="whitespace-nowrap" onClick={() => setCollectorOpen((value) => !value)}><Search size={15} /> 采集</Button>
+          <Button variant="secondary" className="whitespace-nowrap" onClick={() => setImportOpen((value) => !value)}><Upload size={15} /> 导入</Button>
+          <Button variant="ghost" onClick={() => void load()} disabled={loading} aria-label="刷新"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></Button>
+        </div>}
       />
 
-      {actionState && <Panel className="mb-5 p-3 text-sm text-muted">{actionState}</Panel>}
-      {runtime?.warning && <Panel className="mb-5 border-amber-400/30 p-4 text-sm text-amber-100">{runtime.warning}</Panel>}
-      <Panel className="mb-5 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-medium text-mist">手动采集真实来源</h2><p className="mt-1 text-xs text-muted">只运行一次搜索，不自动翻页；结果会保留原文并去重。</p></div><span className="text-xs text-muted">{runtime ? `存储：${runtime.storage_mode === "memory" ? "内存" : "PostgreSQL"}` : "正在读取运行状态…"}</span></div>
-        <div className="mt-4 grid gap-3 md:grid-cols-[170px_1fr_auto]">
-          <select value={source} onChange={(event) => setSource(event.target.value as EvidenceSource)} className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist">
-            {EVIDENCE_SOURCES.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-          <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} maxLength={200} placeholder="输入搜索词" className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-indigo-400" />
-          <Button onClick={() => void collect()} disabled={collecting || !runtime?.sources[source]?.configured || (source === "tikhub" || source === "web_search") && !manualConfirmed}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
+      {runtime?.warning && <p className="mb-4 rounded-md border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">{runtime.warning}</p>}
+
+      {collectorOpen && <Panel className="mb-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium text-mist">手动采集 <span className="ml-1 text-xs font-normal text-muted">只搜一次，不自动翻页；原文保留并去重</span></p>
+          <button className="text-muted hover:text-mist" onClick={() => setCollectorOpen(false)} aria-label="收起采集"><ChevronDown size={18} /></button>
         </div>
-        {(source === "tikhub" || source === "web_search") && <label className="mt-3 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />我确认该来源可能产生费用，并授权本次采集</label>}
-        {runtime && !runtime.sources[source]?.configured && <p className="mt-2 text-xs text-amber-200">该来源未配置，已禁用采集。</p>}
-        {collectState && <p className="mt-3 text-sm text-muted">{collectState}</p>}
-      </Panel>
-
-      <div className="mb-5 grid gap-3 sm:grid-cols-3">
-        {EVIDENCE_CATEGORIES.map((item) => <button key={item} role="tab" aria-selected={category === item} onClick={() => setCategory(item)} className={`rounded-xl border p-4 text-left transition ${category === item ? "border-indigo-400/60 bg-indigo-400/10" : "border-line bg-panel/60 hover:border-slate-500"}`}>
-          <p className={`text-sm font-medium ${category === item ? "text-indigo-200" : "text-mist"}`}>{labels[item]}</p>
-          <p className="mt-1 text-xs leading-5 text-muted">{descriptions[item]}</p>
-        </button>)}
-      </div>
-
-      {importOpen && <Panel className="mb-5 p-5">
-        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><FileJson size={17} className="text-indigo-300" /><h2 className="font-medium text-mist">导入证据 JSON</h2></div><button className="text-muted hover:text-white" onClick={() => setImportOpen(false)} aria-label="关闭导入"><ChevronDown size={18} /></button></div>
-        <p className="mt-1 text-xs text-muted">支持证据数组。导入后会去重，原文不会被改写。</p>
-        <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='[{"source":"tikhub","url":"https://...","raw_text":"...","category":"market"}]' className="mt-4 min-h-32 w-full rounded-lg border border-line bg-ink p-3 font-mono text-xs text-slate-200 outline-none focus:border-indigo-400" aria-label="Evidence JSON" />
-        <div className="mt-3 flex flex-wrap items-center gap-3"><input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} /><Button variant="secondary" onClick={() => fileInput.current?.click()} disabled={importing}><Upload size={15} /> 读取文件</Button><Button onClick={() => void importEvidence()} disabled={!importText.trim() || importing}>{importing && <Loader2 size={15} className="animate-spin" />}{importing ? "导入中…" : "提交导入"}</Button>{importState && <span className="text-sm text-muted">{importState}</span>}</div>
+        <form className="mt-3 grid gap-2 md:grid-cols-[160px_1fr_auto]" onSubmit={(event) => { event.preventDefault(); void collect(); }}>
+          <select value={source} onChange={(event) => setSource(event.target.value as EvidenceSource)} className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist" aria-label="数据源">
+            {EVIDENCE_SOURCES.map((item) => <option key={item} value={item} disabled={runtime ? !runtime.sources[item]?.configured : false}>{SOURCE_LABELS[item]}{BILLABLE_SOURCES.has(item) ? " · 收费" : ""}{runtime && !runtime.sources[item]?.configured ? "（未配置）" : ""}</option>)}
+          </select>
+          <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} placeholder={source === "rss" ? "RSS 地址，或点下面的预设" : "搜索词，回车开始；问句更容易搜到买家，如「有人接剪辑吗」"} aria-label="搜索词" className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-ai" />
+          <Button type="submit" disabled={collecting || !runtime?.sources[source]?.configured || (billable && !manualConfirmed)}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
+        </form>
+        {source === "rss" && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">免费预设：{FEED_PRESETS.map((preset) => <button key={preset.url} type="button" onClick={() => setQuery(preset.url)} className={cn("rounded border px-2 py-0.5 transition", query === preset.url ? "border-ai/60 text-indigo-100" : "border-line hover:text-mist")}>{preset.label}</button>)}</div>}
+        {billable && <label className="mt-2 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />该来源按调用收费，我确认本次采集</label>}
+        {collectState && <p className="mt-2 text-sm text-muted">{collectState}</p>}
       </Panel>}
 
-      {(() => { const visible = records.filter((record) => record.category === category); return <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-mist">{labels[category]}</h2><p className="mt-1 text-xs text-muted">{loading ? "正在加载…" : `${visible.length} 条记录（已加载全部分类）`}</p></div><span className="rounded-full border border-line px-3 py-1 text-xs text-muted">默认仅供复核</span></div>; })()}
+      {importOpen && <Panel className="mb-4 p-4">
+        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><FileJson size={16} className="text-indigo-300" /><p className="text-sm font-medium text-mist">导入证据 JSON <span className="ml-1 text-xs font-normal text-muted">支持证据数组，导入后去重，原文不改写</span></p></div><button className="text-muted hover:text-mist" onClick={() => setImportOpen(false)} aria-label="关闭导入"><ChevronDown size={18} /></button></div>
+        <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='[{"source":"tikhub","url":"https://...","raw_text":"...","category":"market"}]' className="mt-3 min-h-28 w-full rounded-lg border border-line bg-ink p-3 font-mono text-xs text-slate-200 outline-none focus:border-ai" aria-label="Evidence JSON" />
+        <div className="mt-2 flex flex-wrap items-center gap-3"><input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} /><Button variant="secondary" onClick={() => fileInput.current?.click()} disabled={importing}><Upload size={15} /> 读取文件</Button><Button onClick={() => void importEvidence()} disabled={!importText.trim() || importing}>{importing && <Loader2 size={15} className="animate-spin" />}{importing ? "导入中…" : "提交导入"}</Button>{importState && <span className="text-sm text-muted">{importState}</span>}</div>
+      </Panel>}
+
+      <div role="tablist" aria-label="证据分类" className="mb-4 grid gap-2 sm:grid-cols-3">
+        {EVIDENCE_CATEGORIES.map((item, index) => {
+          const active = category === item;
+          const count = counts[item];
+          return (
+            <button key={item} role="tab" aria-selected={active} onClick={() => { setCategory(item); setSourceFilter(null); }} className={cn("rounded-lg border p-3 text-left transition", active ? "border-ai/60 bg-ai/10" : "border-line bg-panel/50 hover:border-slate-500")}>
+              <div className="flex items-baseline justify-between gap-2">
+                <p className={cn("text-sm font-medium", active ? "text-indigo-100" : "text-mist")}>{CATEGORY_LABELS[item]}</p>
+                <p className="mono text-xs text-muted"><b className={cn("text-base font-semibold", count.pending ? "text-amber-200" : "text-muted")}>{count.pending}</b> 待复核 · 共 {count.all}</p>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-muted">{descriptions[item]}</p>
+              <span className="sr-only">分类快捷键 {index + 1}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="sticky top-0 z-10 -mx-1 mb-3 flex flex-wrap items-center gap-2 bg-ink/90 px-1 py-2 backdrop-blur">
+        <div className="flex rounded-md border border-line bg-panel/60 p-0.5" role="group" aria-label="复核状态">
+          {STATUS_FILTERS.map((item) => (
+            <button key={item.value} onClick={() => setStatus(item.value)} aria-pressed={status === item.value} className={cn("rounded px-2.5 py-1 text-xs transition", status === item.value ? "bg-ai/20 text-indigo-100" : "text-muted hover:text-mist")}>
+              {item.label} <span className="mono opacity-70">{counts[category][item.value]}</span>
+            </button>
+          ))}
+        </div>
+        <label className="relative min-w-48 flex-1">
+          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setSearch(""); event.currentTarget.blur(); } }} placeholder="在当前分类里搜索原文或备注" aria-label="搜索证据" className="h-8 w-full rounded-md border border-line bg-panel/60 pl-8 pr-8 text-xs text-mist outline-none focus:border-ai" />
+          <span className="absolute right-2 top-1/2 -translate-y-1/2"><Kbd>/</Kbd></span>
+        </label>
+        <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} aria-label="排序" className="h-8 rounded-md border border-line bg-panel/60 px-2 text-xs text-mist">
+          <option value="grade">等级优先</option>
+          <option value="latest">最新优先</option>
+        </select>
+      </div>
+      {sources.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label="按来源筛选">
+        <span className="text-muted">来源</span>
+        <button onClick={() => setSourceFilter(null)} aria-pressed={sourceFilter === null} className={cn("rounded-full border px-2.5 py-0.5 transition", sourceFilter === null ? "border-ai/60 bg-ai/20 text-indigo-100" : "border-line text-muted hover:text-mist")}>全部</button>
+        {sources.map((item) => <button key={item.key} onClick={() => setSourceFilter(sourceFilter === item.key ? null : item.key)} aria-pressed={sourceFilter === item.key} className={cn("rounded-full border px-2.5 py-0.5 transition", sourceFilter === item.key ? item.tone : "border-line text-muted hover:text-mist")}>{item.label} <span className="mono opacity-70">{item.count}</span></button>)}
+      </div>}
+      <p className="mb-3 hidden flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted sm:flex">
+        <span><Kbd>J</Kbd> <Kbd>K</Kbd> 上下</span><span><Kbd>V</Kbd> 核实</span><span><Kbd>X</Kbd> 排除</span><span><Kbd>U</Kbd> 退回</span><span><Kbd>C</Kbd> 转为机会</span><span><Kbd>O</Kbd> 原文</span><span><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd> 改分类</span>
+      </p>
+
       {loading && <Panel className="flex items-center justify-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18} /> 正在加载证据…</Panel>}
       {!loading && error && <Panel className="border-red-400/30 p-6"><div className="flex items-start gap-3 text-red-200"><AlertCircle size={19} className="mt-0.5 shrink-0" /><div><p className="font-medium">加载失败</p><p className="mt-1 text-sm text-red-200/80">{error}</p><Button className="mt-4" variant="secondary" onClick={() => void load()}>重试</Button></div></div></Panel>}
-      {!loading && !error && records.filter((record) => record.category === category).length === 0 && <EmptyState title={`还没有${labels[category]}`}><p className="text-sm text-muted">可以先运行一个雷达，或者导入一批真实来源数据。</p><Button className="mt-5" onClick={() => setImportOpen(true)}>导入第一批证据</Button></EmptyState>}
-      {!loading && !error && records.filter((record) => record.category === category).length > 0 && <div className="space-y-4">{records.filter((record) => record.category === category).map((record) => <EvidenceCard key={record.evidence_id} record={record} onReview={review} onConvert={convert} />)}</div>}
+      {!loading && !error && visible.length === 0 && (
+        counts[category].all > 0 && status === "pending" && !search
+          ? <EmptyState title={`「${CATEGORY_LABELS[category]}」已全部复核完 🎉`}><p className="text-sm text-muted">核实 {counts[category].verified} 条，排除 {counts[category].invalidated} 条。</p><Button className="mt-4" variant="secondary" onClick={() => setStatus("verified")}>查看已核实</Button></EmptyState>
+          : <EmptyState title={search ? `没有匹配「${search}」的证据` : `还没有${CATEGORY_LABELS[category]}`}>{!search && <><p className="text-sm text-muted">可以先采集一次，或者导入一批真实来源数据。</p><Button className="mt-4" onClick={() => setCollectorOpen(true)}>开始采集</Button></>}</EmptyState>
+      )}
+      {!loading && !error && visible.length > 0 && (
+        <div className="space-y-2 pb-24">
+          {visible.map((record) => (
+            <EvidenceRow
+              key={record.evidence_id}
+              record={record}
+              selected={record.evidence_id === selectedId}
+              converting={record.evidence_id === convertingId}
+              onSelect={() => setSelectedId(record.evidence_id)}
+              onReview={(input) => review(record, input)}
+              onStartConvert={() => void startConvert(record)}
+              onCancelConvert={() => { setConvertingId(null); const left = recordsRef.current.find((item) => item.evidence_id === record.evidence_id); if (left) applyRecord(left, record.evidence_id, null); }}
+              onConvert={(input) => convert(record, input)}
+            />
+          ))}
+        </div>
+      )}
+
+      {toast && (
+        <div role="status" onMouseEnter={holdToast} onMouseLeave={releaseToast} className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-panel px-4 py-2.5 text-sm text-mist shadow-xl">
+          <span className="max-w-[60vw] truncate">{toast.message}</span>
+          {toast.href && <Link href={toast.href} className="text-signal hover:underline">查看</Link>}
+          {toast.undo && <button className="font-medium text-indigo-200 hover:text-white" onClick={() => { const undo = toast.undo; showToast(null); void undo?.(); }}>撤销</button>}
+        </div>
+      )}
     </>
   );
 }

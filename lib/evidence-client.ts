@@ -45,8 +45,27 @@ export type EvidenceBatchResult = {
   records: EvidenceRecord[];
 };
 
-export const EVIDENCE_SOURCES = ["github", "hackernews", "rss", "tikhub", "web_search"] as const;
+export const EVIDENCE_SOURCES = ["rss", "douyin", "xiaohongshu", "weibo", "zhihu", "tikhub", "hackernews", "github", "web_search"] as const;
 export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+export const SOURCE_LABELS: Record<EvidenceSource, string> = {
+  rss: "RSS（含 V2EX）",
+  douyin: "抖音",
+  xiaohongshu: "小红书",
+  weibo: "微博",
+  zhihu: "知乎",
+  tikhub: "TikTok",
+  hackernews: "Hacker News",
+  github: "GitHub",
+  web_search: "网页搜索",
+};
+/** Sources billed per call (TikHub, Firecrawl); the API refuses them without manual confirmation. */
+export const BILLABLE_SOURCES: ReadonlySet<EvidenceSource> = new Set(["douyin", "xiaohongshu", "weibo", "zhihu", "tikhub", "web_search"]);
+/** Free domestic feeds worth polling for paid work. */
+export const FEED_PRESETS = [
+  { label: "V2EX 外包", url: "https://www.v2ex.com/feed/outsourcing.xml" },
+  { label: "V2EX 酷工作", url: "https://www.v2ex.com/feed/jobs.xml" },
+  { label: "V2EX 远程", url: "https://www.v2ex.com/feed/remote.xml" },
+] as const;
 export type EvidenceRuntime = {
   storage_mode: "memory" | "postgres";
   warning: string | null;

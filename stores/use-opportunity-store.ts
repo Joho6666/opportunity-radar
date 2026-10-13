@@ -13,6 +13,21 @@ import type { Opportunity, OpportunityStatus, Profile, Radar, Skill } from "@/ty
 type AppState = { opportunities: Opportunity[]; radars: Radar[]; profile: Profile; skills: Skill[]; hydrated: boolean; loading: boolean; error: string | null; hydrate: (force?: boolean) => Promise<void>; retry: () => Promise<void>; updateOpportunity: (id: string, status: OpportunityStatus, actualRevenue?: number) => Promise<boolean>; toggleSaved: (id: string) => Promise<void>; toggleSkill: (id: string) => void; toggleRadar: (id: string) => Promise<void>; runRadarNow: (id: string) => Promise<void>; addRadar: (radar: Radar) => void; updateProfile: (profile: Profile) => Promise<void>; reset: () => void; };
 const emptyProfile: Profile = { name: "", identity: "", skills: [], skillLevels: {}, goals: [], location: "", workModes: [], monthlyIncomeGoal: 0, minimumProjectBudget: 0, availableHoursPerDay: 0, excludedOpportunityTypes: [] };
 const seed = useMockMode ? { opportunities: mockOpportunities, radars: mockRadars, profile: mockProfile, skills: mockSkills } : { opportunities: [], radars: [], profile: emptyProfile, skills: [] };
+// Runtime flags never come back from storage: a stored `hydrated` would skip every later
+// fetch from the API, and a stored `loading` would block hydrate() forever. Demo mode keeps
+// `hydrated` because its data lives only in storage and re-hydrating would reset it.
+type Persisted = Partial<AppState>;
+export function persistable(state: Persisted, mockMode = useMockMode): Persisted {
+  const rest = { ...state };
+  delete rest.hydrated;
+  delete rest.loading;
+  delete rest.error;
+  return mockMode ? { ...rest, hydrated: state.hydrated } : rest;
+}
+export function mergePersisted<T extends Persisted>(persisted: unknown, current: T, mockMode = useMockMode): T {
+  return { ...current, ...persistable((persisted ?? {}) as Persisted, mockMode) };
+}
+
 const failureMessage = (error: unknown) => error instanceof Error ? error.message : "操作失败，请重试";
 
 export const useOpportunityStore = create<AppState>()(persist((set, get) => ({ ...seed, hydrated: false, loading: false, error: null,
@@ -42,4 +57,8 @@ export const useOpportunityStore = create<AppState>()(persist((set, get) => ({ .
   addRadar: (radar) => set((state) => ({ radars: [radar, ...state.radars] })),
   updateProfile: async (profile) => { const previous = get().profile; set({ profile, loading: true, error: null }); try { await saveProfile(profile); set({ loading: false }); } catch (error) { set({ profile: previous, loading: false, error: failureMessage(error) }); throw error; } },
   reset: () => set({ ...seed, hydrated: false, loading: false, error: null })
-}), { name: "opportunity-radar-v3" }));
+}), {
+  name: "opportunity-radar-v3",
+  partialize: (state) => persistable(state),
+  merge: (persisted, current) => mergePersisted(persisted, current),
+}));

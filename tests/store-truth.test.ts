@@ -8,7 +8,7 @@ vi.mock("@/services/opportunity.service", () => ({ listOpportunities: service.li
 vi.mock("@/services/radar.service", () => ({ listRadars: service.radars, runRadar: service.run, setRadarPaused: service.pause }));
 vi.mock("@/services/profile.service", () => ({ getProfile: service.profile, saveProfile: service.save }));
 vi.hoisted(() => { const values = new Map<string, string>(); Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) } }); });
-import { useOpportunityStore as store } from "@/stores/use-opportunity-store";
+import { mergePersisted, persistable, useOpportunityStore as store } from "@/stores/use-opportunity-store";
 beforeEach(() => { vi.resetAllMocks(); store.getState().reset(); service.list.mockResolvedValue(mockOpportunities); service.radars.mockResolvedValue(mockRadars); service.profile.mockResolvedValue(mockProfile); });
 it("reads the authoritative list after opportunity actions", async () => {
   store.setState({ opportunities: mockOpportunities });
@@ -25,4 +25,25 @@ it("returns failure without unhandled rejection for existing fire-and-forget cal
   expect(store.getState().opportunities).toEqual(mockOpportunities);
   expect(store.getState().error).toBe("保存失败");
   expect(store.getState().loading).toBe(false);
+});
+it("restoring an older stored state never brings back hydrated/loading/error in API mode", async () => {
+  const legacy = { opportunities: [], radars: [], hydrated: true, loading: true, error: "旧错误" };
+  const merged = mergePersisted(legacy, store.getState(), false);
+  expect(merged.hydrated).toBe(false);
+  expect(merged.loading).toBe(false);
+  expect(merged.error).toBeNull();
+  store.setState(merged);
+  await store.getState().hydrate();
+  expect(service.list).toHaveBeenCalledTimes(1);
+  expect(store.getState().opportunities).toEqual(mockOpportunities);
+});
+it("never writes runtime flags to storage in API mode; demo mode keeps hydrated", () => {
+  const state = { opportunities: mockOpportunities, hydrated: true, loading: true, error: "x" };
+  const api = persistable(state, false);
+  expect(api.opportunities).toEqual(mockOpportunities);
+  expect(api).not.toHaveProperty("hydrated");
+  expect(api).not.toHaveProperty("loading");
+  expect(api).not.toHaveProperty("error");
+  expect(persistable(state, true)).toMatchObject({ hydrated: true });
+  expect(persistable(state, true)).not.toHaveProperty("loading");
 });
