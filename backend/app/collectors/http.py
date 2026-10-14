@@ -92,9 +92,11 @@ class HttpFetcher:
             last_error: Exception | None = None
             retries = 0 if billable_provider else self.retries
             for attempt in range(retries + 1):
+                reservation = None
+                finalized = False
                 try:
-                    from ..services.billing_gateway import reserve, finish
-                    reservation = reserve(billable_provider, billable_source) if billable_provider else None
+                    from ..services.billing_gateway import reserve, finish, archive_response
+                    reservation = reserve(billable_provider, billable_source, endpoint=urlparse(url).path) if billable_provider else None
                     from .transport import public_transport
                     client = self._client or httpx.AsyncClient(timeout=timeout, follow_redirects=False, transport=public_transport(), trust_env=False)
                     close = self._client is None
@@ -104,11 +106,15 @@ class HttpFetcher:
                         if close:
                             await client.aclose()
                     if reservation:
+                        body_args = kwargs.get("json") or {}
+                        query = body_args.get("keyword") or body_args.get("query") or response.request.url.params.get("keyword") or response.request.url.params.get("query")
+                        archive_response(reservation, response, query)
                         try:
                             reported=response.json()
                         except ValueError:
                             reported=None
                         finish(reservation,reported if isinstance(reported,dict) else None,ok=response.is_success)
+                        finalized = True
                     self._last_call[host] = loop.time()
                     if response.status_code in {429, 500, 502, 503, 504} and attempt < retries:
                         await asyncio.sleep(0.4 * (attempt + 1))
@@ -116,7 +122,7 @@ class HttpFetcher:
                     response.raise_for_status()
                     return response
                 except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
-                    if reservation:
+                    if reservation and not finalized:
                         finish(reservation, ok=False)
                     last_error = exc
                     if attempt >= retries or (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code not in {429, 500, 502, 503, 504}):

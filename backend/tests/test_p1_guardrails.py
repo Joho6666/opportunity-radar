@@ -1,6 +1,7 @@
 """P1 guardrails: budget, retention, brief history, payment aggregation, config."""
 
 import asyncio
+from uuid import uuid4
 from datetime import UTC, datetime, timedelta
 
 from app.core.config import Settings
@@ -37,11 +38,11 @@ def _repo(user_id: str = "p1-user"):
 
 
 def test_budget_exhaustion_skips_llm_without_failing_run(monkeypatch):
-    repo, user_id, radar = _repo()
-    monkeypatch.setattr("app.services.budget_service.get_settings", lambda: Settings(llm_daily_token_budget=15))
+    repo, user_id, radar = _repo(str(uuid4()))
+    monkeypatch.setattr("app.services.budget_service.get_settings", lambda: Settings(_env_file=None, llm_daily_token_budget=15, redis_url=""))
     import app.services.radar_run_service as rrs
 
-    monkeypatch.setattr(rrs, "get_settings", lambda: Settings(llm_daily_token_budget=15))
+    monkeypatch.setattr(rrs, "get_settings", lambda: Settings(_env_file=None, llm_daily_token_budget=15, redis_url=""))
     monkeypatch.setattr(rrs, "get_provider", lambda: _StubProvider())
     items = [
         _item("https://a/1", "AI 求助一", PAID),

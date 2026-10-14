@@ -86,6 +86,163 @@ def test_actual_cost_unknown_is_not_zero(billing):
     assert row == (None,17,"succeeded")
 
 
+def test_repeat_finish_preserves_reported_usage(billing):
+    repo, uid = billing
+    with paid_context(repo, uid, "evidence", str(uuid4())):
+        reservation = reserve("tikhub", "douyin")
+        finish(reservation, {"usage": {"cost_usd": .06, "total_tokens": 17}}, ok=False)
+        finish(reservation, ok=False)
+    with repo.engine.connect() as conn:
+        row = conn.execute(text("SELECT actual_micros,actual_tokens,status FROM billing_calls WHERE id=CAST(:id AS uuid)"), {"id": reservation[1]}).one()
+    assert row == (60000, 17, "failed")
+
+
+def test_malformed_usage_does_not_prevent_safe_finalization(billing):
+    repo, uid = billing
+    with paid_context(repo, uid, "evidence", str(uuid4())):
+        reservation = reserve("tikhub", "douyin")
+        finish(reservation, {"usage": "unexpected provider shape"}, ok=False)
+    with repo.engine.connect() as conn:
+        row = conn.execute(text("SELECT actual_micros,actual_tokens,status FROM billing_calls WHERE id=CAST(:id AS uuid)"), {"id": reservation[1]}).one()
+    assert row == (None, None, "failed")
+
+
+def test_http_error_preserves_provider_reported_cost(billing, monkeypatch):
+    import httpx
+    from app.collectors.http import HttpFetcher
+    repo, uid = billing
+    monkeypatch.setattr("app.collectors.http.validate_public_url", lambda _: "public.example")
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(503, json={"usage": {"cost_usd": .06}}))) as client:
+            with paid_context(repo, uid, "evidence", str(uuid4())):
+                with pytest.raises(httpx.HTTPStatusError):
+                    await HttpFetcher(client=client).get_json("https://public.example", billable_provider="tikhub", billable_source="douyin")
+    asyncio.run(run())
+    with repo.engine.connect() as conn:
+        assert conn.execute(text("SELECT actual_micros FROM billing_calls WHERE user_id=CAST(:uid AS uuid)"), {"uid": uid}).scalar_one() == 60000
+
+
+@pytest.fixture
+def batch_billing(billing, monkeypatch):
+    repo, uid = billing
+    batch_id = str(uuid4())
+    # Model an active server-selected batch without creating a new batch per request.
+    monkeypatch.setitem(get_settings().__dict__, "paid_batch_id", batch_id)
+    with repo.engine.begin() as conn:
+        conn.execute(text("UPDATE billing_authorizations SET daily_requests=100,run_requests=100,daily_micros=1000000,run_micros=1000000 WHERE user_id=CAST(:uid AS uuid)"), {"uid": uid})
+        conn.execute(text("INSERT INTO billing_batches(id,user_id,enabled,providers,sources,request_limit,cost_limit_micros,request_limit_micros) VALUES(:id,CAST(:uid AS uuid),true,'[\"tikhub\"]','[\"douyin\"]',5,500000,100000)"), {"id": batch_id, "uid": uid})
+    return repo, uid, batch_id
+
+
+def test_batch_limit_survives_day_change_and_new_repository(batch_billing):
+    from app.repositories.postgres import PostgresRepository
+    repo, uid, batch_id = batch_billing
+    for _ in range(5):
+        with paid_context(repo, uid, "evidence", str(uuid4())):
+            reserve("tikhub", "douyin")
+    with repo.engine.begin() as conn:
+        conn.execute(text("UPDATE billing_calls SET created_at=now()-interval '2 days' WHERE user_id=CAST(:uid AS uuid)"), {"uid": uid})
+    with paid_context(PostgresRepository(repo.engine), uid, "evidence", str(uuid4())):
+        with pytest.raises(AppError) as err:
+            reserve("tikhub", "douyin")
+    assert err.value.code == "PAID_BATCH_EXHAUSTED"
+
+
+def test_batch_concurrency_is_atomic(batch_billing):
+    repo, uid, batch_id = batch_billing
+    def call(_):
+        with paid_context(repo, uid, "evidence", str(uuid4())):
+            try:
+                reserve("tikhub", "douyin")
+                return True
+            except AppError:
+                return False
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert sum(pool.map(call, range(12))) == 5
+
+
+def test_batch_source_and_single_request_cost_are_enforced(batch_billing, monkeypatch):
+    repo, uid, batch_id = batch_billing
+    with paid_context(repo, uid, "evidence", str(uuid4())):
+        with pytest.raises(AppError) as err:
+            reserve("tikhub", "weibo")
+        assert err.value.code == "PAID_BATCH_UNAUTHORIZED"
+        monkeypatch.setattr(get_settings(), "tikhub_price_per_request", .11)
+        with pytest.raises(AppError) as err:
+            reserve("tikhub", "douyin")
+        assert err.value.code == "PAID_BATCH_EXHAUSTED"
+
+
+def test_debug_batch_cannot_enable_radar_even_with_prior_grant(batch_billing):
+    repo, uid, _ = batch_billing
+    with repo.engine.begin() as conn:
+        conn.execute(text("INSERT INTO billing_authorizations SELECT user_id,'radar:test',enabled,providers,allow_scheduled,run_requests,daily_requests,run_micros,daily_micros,updated_at FROM billing_authorizations WHERE user_id=CAST(:uid AS uuid)"), {"uid":uid})
+    with paid_context(repo, uid, "radar:test", str(uuid4())):
+        with pytest.raises(AppError) as err:
+            reserve("tikhub", "douyin")
+    assert err.value.code == "PAID_BATCH_UNAUTHORIZED"
+
+
+def test_batch_cost_includes_actual_overrun(batch_billing):
+    repo, uid, _ = batch_billing
+    with paid_context(repo, uid, "evidence", str(uuid4())):
+        finish(reserve("tikhub", "douyin"), {"usage": {"cost_usd": .46}})
+        with pytest.raises(AppError) as err:
+            reserve("tikhub", "douyin")
+    assert err.value.code == "PAID_BATCH_EXHAUSTED"
+
+
+def test_status_reports_cumulative_batch_balance(batch_billing, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    repo, uid, batch_id = batch_billing
+    with paid_context(repo, uid, "evidence", str(uuid4())):
+        reserve("tikhub", "douyin")
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    with TestClient(app) as client:
+        data = client.get("/api/billing/status").json()
+    assert data["batch"]["id"] == batch_id
+    assert data["batch"]["remaining_requests"] == 4
+    assert data["batch"]["remaining_cost_usd"] == pytest.approx(.45)
+
+
+def test_settings_repr_does_not_disclose_credentials():
+    from app.core.config import Settings
+    assert "SECRET_VALUE" not in repr(Settings(tikhub_api_key="SECRET_VALUE"))
+
+
+def test_unknown_endpoint_cannot_fall_back_to_flat_price(billing, monkeypatch):
+    repo, uid = billing
+    monkeypatch.setattr(get_settings(),"tikhub_endpoint_prices_json",'{"/search":0.02}')
+    with paid_context(repo,uid,"evidence",str(uuid4())):
+        with pytest.raises(AppError) as err:
+            reserve("tikhub","douyin",endpoint="/unknown")
+        assert err.value.code == "BILLING_PRICE_REQUIRED"
+        reservation=reserve("tikhub","douyin",endpoint="/search")
+    with repo.engine.connect() as conn:
+        assert conn.execute(text("SELECT reserved_micros FROM billing_calls WHERE id=CAST(:id AS uuid)"),{"id":reservation[1]}).scalar_one() == 20000
+
+
+def test_paid_response_archived_before_schema_failure(billing, monkeypatch):
+    import httpx
+    from app.collectors.http import HttpFetcher
+    repo, uid = billing
+    monkeypatch.setattr("app.collectors.http.validate_public_url", lambda _: "public.example")
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"data": "schema drift", "request_id": "r1", "authorization": "SECRET"}))) as client:
+            with paid_context(repo, uid, "evidence", str(uuid4())):
+                await HttpFetcher(client=client).get_json("https://public.example/search?keyword=PPT", billable_provider="tikhub", billable_source="douyin")
+    asyncio.run(run())
+    with repo.engine.connect() as conn:
+        row = conn.execute(text("SELECT query,status_code,payload FROM provider_responses WHERE user_id=CAST(:uid AS uuid)"), {"uid": uid}).first()
+    assert row is not None
+    assert row[0:2] == ("PPT", 200)
+    assert row.payload["data"] == "schema drift" and "SECRET" not in str(row.payload)
+
+
 def test_all_paid_adapters_block_without_network(monkeypatch):
     from app.collectors.tikhub import TikHubCollector
     from app.collectors.tikhub_cn import DOMESTIC_COLLECTORS

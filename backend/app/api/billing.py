@@ -50,12 +50,17 @@ async def authorize(scope: str, value: Authorization, user: CurrentUser = Depend
 @router.get("/status")
 async def status(user: CurrentUser = Depends(get_current_user), repo=Depends(get_repository)):
     result = {"paid_api_enabled": get_settings().paid_api_enabled, "authorizations": [], "requests_today": 0, "reserved_cost_usd": 0, "actual_cost_usd": None, "tokens_reported": None}
+    result["batch"] = None
     if not hasattr(repo, "engine"):
         return {**result, "warning": "内存模式禁止真实付费调用"}
     uid = as_uuid(user.id)
     with repo.engine.begin() as conn:
         policies = conn.execute(text("SELECT scope,enabled,providers,allow_scheduled,run_requests,daily_requests,run_micros,daily_micros FROM billing_authorizations WHERE user_id=CAST(:uid AS uuid)"), {"uid": uid}).mappings().all()
         calls = conn.execute(text("SELECT scope,count(*) requests,sum(GREATEST(reserved_micros,COALESCE(actual_micros,0))) cost,sum(reserved_micros) estimated,CASE WHEN count(actual_micros)=count(*) THEN sum(actual_micros) ELSE NULL END actual,sum(actual_tokens) tokens FROM billing_calls WHERE user_id=CAST(:uid AS uuid) AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' GROUP BY scope"), {"uid": uid}).mappings().all()
+        batch = conn.execute(text("SELECT * FROM billing_batches WHERE id=:id AND user_id=CAST(:uid AS uuid)"), {"uid": uid, "id": get_settings().paid_batch_id}).mappings().first()
+        if batch:
+            used = conn.execute(text("SELECT count(*) requests,COALESCE(sum(GREATEST(reserved_micros,COALESCE(actual_micros,0))),0) cost,CASE WHEN count(*)>0 AND count(actual_micros)=count(*) THEN sum(actual_micros) ELSE NULL END actual FROM billing_calls WHERE batch_id=:id"), {"id": batch["id"]}).mappings().one()
+            result["batch"] = {"id": batch["id"], "enabled": batch["enabled"], "requests": used["requests"], "consumed_cost_usd": used["cost"]/1_000_000, "actual_cost_usd": used["actual"]/1_000_000 if used["actual"] is not None else None, "remaining_requests": max(0,batch["request_limit"]-used["requests"]), "remaining_cost_usd": max(0,batch["cost_limit_micros"]-used["cost"])/1_000_000, "request_cost_limit_usd": batch["request_limit_micros"]/1_000_000}
     by_scope = {row["scope"]: row for row in calls}
     account_requests = max(0, get_settings().paid_daily_request_limit - sum(row["requests"] for row in calls))
     account_micros = max(0, _micros(get_settings().paid_daily_cost_limit) - sum(row["cost"] for row in calls))

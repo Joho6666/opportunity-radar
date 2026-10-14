@@ -5,24 +5,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    database_url: str = ""
+    database_url: str = Field(default="", repr=False)
     supabase_url: str = ""
-    supabase_anon_key: str = ""
-    supabase_service_role_key: str = ""
-    supabase_jwt_secret: str = ""
+    supabase_anon_key: str = Field(default="", repr=False)
+    supabase_service_role_key: str = Field(default="", repr=False)
+    supabase_jwt_secret: str = Field(default="", repr=False)
     auth_disabled: bool = False
     local_user_id: str = "00000000-0000-0000-0000-000000000001"
     llm_base_url: str = ""
-    llm_api_key: str = ""
+    llm_api_key: str = Field(default="", repr=False)
     llm_model: str = ""
     llm_fast_model: str = ""
-    firecrawl_api_key: str = ""
-    github_token: str = ""
-    tikhub_api_key: str = ""
+    firecrawl_api_key: str = Field(default="", repr=False)
+    github_token: str = Field(default="", repr=False)
+    tikhub_api_key: str = Field(default="", repr=False)
     # api.tikhub.dev is TikHub's mainland-China endpoint; api.tikhub.io works through a proxy.
     tikhub_base_url: str = "https://api.tikhub.io"
     rss_feeds: str = "https://hnrss.org/newest,https://github.blog/feed/"
-    redis_url: str = ""
+    redis_url: str = Field(default="", repr=False)
     # Trust 198.18.0.0/15 DNS answers from a local fake-IP proxy (Clash/Mihomo TUN). Local use only.
     allow_fake_ip_dns: bool = False
     cors_origins: str = "http://127.0.0.1:3001,http://localhost:3000"
@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     paid_api_enabled: bool = False
     paid_daily_cost_limit: float = Field(default=1.0,gt=0,allow_inf_nan=False)
     paid_daily_request_limit: int = Field(default=20,ge=1,le=100000)
+    paid_batch_id: str = ""  # Server-selected cumulative authorization; never reset per run/day.
+    tikhub_endpoint_prices_json: str = ""  # Verified USD/request by endpoint; missing endpoints fail closed.
     tikhub_price_per_request: float = 0.0
     firecrawl_price_per_request: float = 0.0
     embedding_price_per_mtok: float = 0.0
