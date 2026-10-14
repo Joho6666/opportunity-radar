@@ -30,6 +30,11 @@ async def quote(opportunity_id: str, payload: "QuoteRequest", user: CurrentUser 
     repo.update_pipeline(user.id,opportunity_id,PipelinePatch(quote_draft=draft,service_type=payload.service_type))
     return draft
 
+@router.post("/{opportunity_id}/quote/preview")
+async def preview_quote(opportunity_id: str, payload: QuoteRequest, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    from ..services.acquisition_service import quote_draft
+    return quote_draft(repo.get_opportunity(user.id,opportunity_id),payload)
+
 @router.post("/{opportunity_id}/communication")
 async def communication(opportunity_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     from ..services.acquisition_service import outreach_draft
