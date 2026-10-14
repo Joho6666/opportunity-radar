@@ -1,0 +1,74 @@
+{
+  "dataset": "synthetic bilingual v1; not a live accuracy estimate",
+  "samples": 64,
+  "metrics": {
+    "buyer": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 16
+    },
+    "seller": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12
+    },
+    "job": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12
+    },
+    "content": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12
+    },
+    "market": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 12
+    }
+  },
+  "confusion_matrix": {
+    "buyer": {
+      "buyer": 16,
+      "seller": 0,
+      "job": 0,
+      "content": 0,
+      "market": 0
+    },
+    "seller": {
+      "buyer": 0,
+      "seller": 12,
+      "job": 0,
+      "content": 0,
+      "market": 0
+    },
+    "job": {
+      "buyer": 0,
+      "seller": 0,
+      "job": 12,
+      "content": 0,
+      "market": 0
+    },
+    "content": {
+      "buyer": 0,
+      "seller": 0,
+      "job": 0,
+      "content": 12,
+      "market": 0
+    },
+    "market": {
+      "buyer": 0,
+      "seller": 0,
+      "job": 0,
+      "content": 0,
+      "market": 12
+    }
+  },
+  "errors": []
+}

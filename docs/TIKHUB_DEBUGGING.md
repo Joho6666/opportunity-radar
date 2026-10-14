@@ -59,7 +59,7 @@ PAID_DAILY_COST_LIMIT=0.5
 ENABLE_AI_CLASSIFICATION=false
 ```
 
-取得 Marketplace 的当前单价后，仅把已核实端点的 USD/request 写入价格 JSON，并保存报价出处和时间。三个路径：
+取得 Marketplace 的当前单价后，仅把已核实端点的 USD/request 写入价格 JSON，并保存报价出处和时间。仅设置 `TIKHUB_ENDPOINT_PRICES_JSON` 不会解锁调用；`TIKHUB_PRICE_RECEIPTS_JSON` 必须以相同端点键记录 `price_usd`、`unit`（USD/request）、`source_url`（官方HTTPS页面）、`verified_at`（带时区）和 `verified_by`（实际核实人），与单价完全匹配，随账本持久化。这是管理员核实声明，不能用通用价格区间或测试收据代替精确报价，也不是服务商实际账单。三个路径：
 
 ```text
 /api/v1/xiaohongshu/app_v2/search_notes

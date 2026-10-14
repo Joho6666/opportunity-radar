@@ -1,6 +1,6 @@
 # Opportunity Radar 当前架构
 
-审计基线：2026-10-13，main `7f6e7c4`，证据分支 `1d34837`（领先 17 次提交）。TikHub 本轮起点 `4e2f2b2`；继续在独立 `feat/production-acquisition-loop` 开发，未合并 main。历史目标架构见 MONEY_INTELLIGENCE_ROADMAP，本文件描述实际实现。
+审计基线：2026-10-13，main `7f6e7c4`，证据分支 `1d34837`（领先 17 次提交）。TikHub接入起点 `4e2f2b2`；2026-10-14准确性改进起点 `3103113`；继续在独立 `feat/production-acquisition-loop` 开发，未合并 main。历史目标架构见 MONEY_INTELLIGENCE_ROADMAP，本文件描述实际实现。
 
 ```mermaid
 flowchart TB
@@ -18,7 +18,8 @@ flowchart TB
  HTTP[HTTP：DNS 连接时校验、固定 IP、限速/退避、熔断]
  RAW[RawItem：原文/链接/作者/发布时间/更新时间]
  RULE[五类规则：buyer / seller / job / content / market]
- AI[可选低价语义模型；低置信或高价值冲突升级]
+ LOCAL[本地 SetFit：固定版本、影子模式、截断和分歧复核]
+ AI[可选付费语义层：当前禁用]
  EVID[统一 Evidence Inbox：跨运行身份去重、原文修订历史、人工纠正历史]
  SCORE[可解释优先级预测；证据等级与人工状态独立]
  CRM[统一 opportunities + pipeline_data + actions：跟进、草案、实收/成本/工时]
@@ -31,7 +32,7 @@ flowchart TB
  BILL --> BATCH --> PG
  HTTP --> RECEIPT --> PG
  RECEIPT --> REPLAY
- RAW --> RULE --> AI --> EVID --> SCORE --> CRM
+ RAW --> RULE --> LOCAL --> AI --> EVID --> SCORE --> CRM
  API --> EVID
  API --> CRM
  BILL --> PG
@@ -53,7 +54,8 @@ flowchart TB
 - Repository 所有公开业务操作限定 user。Compose 的 postgres 服务账号绕过 RLS，因此 Repository 是服务端边界；非超级用户契约测试单独验证数据库 RLS。生产应使用专用后端角色并避免暴露数据库。
 - 原文更新不会新增同一客户机会：保存证据旧版本；已核实证据和关联线索退回 disputed。业务成交历史不会被覆盖。
 - Pipeline：新发现 → 待核实 → 已核实 → 待联系 → 已联系 → 已回复 → 已报价 → 洽谈中 → 已成交/流失。保留旧收藏/忽略状态；推进销售必须人工核实；流失必须原因。
-- 报价使用人工输入费率、工时与范围生成可编辑三档草案。沟通草案不发送消息，不自动记录联系/回复/报价。
+- 报价预览无写入；保存追加版本，重复请求幂等，旧版本不能覆盖新版本。文档/视频/网站/小程序三档交付物可编辑，内部工时成本独立于销售费率；成本缺失的税前利润未知。有效期与付款节点可编辑，跟进追加记录关联原文/报价版本，今日/逾期筛选按本机日期。
+- 五类意图与有效状态、支付证据、服务适用性独立。取消/过期或不适用退出可行动队列；纠正保存依据，原文变更使旧审核失效。SetFit本地加载、默认影子、缺失显示回退；真实标签不足，尚无达标模型。合成数据从获客漏斗和训练导出排除。
 - 获客漏斗来自采集收据、唯一证据与实际阶段时间戳。缺少分母、账单或实收时为 null；日界 UTC。
 
 ## 来源能力与验证层级
@@ -62,7 +64,7 @@ flowchart TB
 |---|---|---|
 | GitHub | 仓库搜索、`issues:` 公开开放 Issue、page 分页、更新时间 | 本轮真实免费 Issue 响应解析验证；仓库原有契约测试 |
 | Hacker News | 帖子、`comments:` 评论、page 分页、父帖关系 | 本轮真实免费评论响应解析验证 |
-| RSS | 合法公开订阅、时间、链接 | 离线契约测试；没有本轮真实 RSS 探针 |
+| RSS | 合法公开订阅、独立发布和更新时间、链接 | 2026-10-14 V2EX官方RSS一次免费请求，10条未核实样本已归档；预测不代表已核实客户 |
 | TikTok / 抖音 / 小红书 / 微博 / 知乎 | TikHub adapter、时间与类型、服务端会话续页、抖音带 ID 评论独立归属 | 合成响应契约；已授权本轮小批次但官方端点单价未确认，实际请求 0，不能称 schema 或密钥已实证 |
 | Web Search | Firecrawl 搜索 | 离线契约；真实付费禁用 |
 
@@ -71,3 +73,5 @@ flowchart TB
 ## 部署和验证
 
 参见 [README](README.md)、[生产升级审计](docs/PRODUCTION_UPGRADE.md)、[TikHub 受限采集与回放](docs/TIKHUB_DEBUGGING.md)。CI 覆盖 `feat/**` push 与全部 PR：前端四项、真实 PostgreSQL/pgvector 与 Redis 契约、重复迁移、Compose 健康与重启持久化。真实生产 Supabase 登录端到端、付费模型/国内 API 和客户转化仍需单独验收。
+
+2026-10-14本轮准确性、SetFit运行、报价版本和隔离验收说明见 [ACQUISITION_ACCURACY](docs/ACQUISITION_ACCURACY.md)。

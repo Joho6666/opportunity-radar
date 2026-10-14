@@ -2,6 +2,8 @@
 
 个人优先的公开商机情报与获客工作台。保留 Next.js 15 与 FastAPI：采集 → 证据 → 分类预测 → 人工核实 → Opportunities / Pipeline → 报价与沟通草案 → 人工跟进 → 实际结果反馈。
 
+2026-10-14新增独立需求有效状态/支付证据/服务适用性、SetFit本地影子模式和人工标注导出；无写入报价预览、差异化可编辑套餐、成本未知利润未知、报价版本历史；Pipeline追加跟进和今日/逾期筛选。部署默认禁用真实付费调用，没有真实达标分类模型或成交证明。详细配置、使用和样本边界见 [实施说明](docs/ACQUISITION_ACCURACY.md) 和 [本轮验证](docs/VALIDATION_2026-10-14.md)。
+
 当前能力和限制：[CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)；生产升级：[docs/PRODUCTION_UPGRADE.md](docs/PRODUCTION_UPGRADE.md)；TikHub 累计额度与关键词回放：[docs/TIKHUB_DEBUGGING.md](docs/TIKHUB_DEBUGGING.md)；长期方向：[MONEY_INTELLIGENCE_ROADMAP.md](MONEY_INTELLIGENCE_ROADMAP.md)。没有数据时显示暂无数据；任何分类分数均不代表成交概率。
 
 ## 本机使用（持久化、付费关闭）
