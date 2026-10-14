@@ -75,3 +75,21 @@ def test_import_cannot_forge_human_label_or_qualification_review():
     from app.schemas.evidence import EvidenceBatch
     with pytest.raises(ValueError):
         EvidenceBatch(batch_id='forged-label',items=[{'source':'rss','url':'https://example.test/forged','raw_text':'需要做个网站，找人帮我。','metadata':{'human_label_digest':'forged','qualification_review':'{"availability":"open"}'}}])
+
+
+def test_radar_retains_closed_evidence_but_creates_no_sales_candidate():
+    import asyncio
+    from app.repositories.memory import MemoryRepository
+    from app.schemas.domain import RadarCreate,RawItem
+    from app.services.radar_run_service import RadarRunService
+    class Registry:
+        async def search(self,*args):
+            return [RawItem(source='rss',url='https://example.test/radar-cancelled',title='找人做PPT，预算500元',content='找人做PPT，预算500元，本周交付。需求已取消。',external_id='radar-cancelled')],None
+    repo=MemoryRepository();uid='radar-closed-test'
+    radar=repo.create_radar(uid,RadarCreate(name='PPT',goal='寻找真实的PPT制作买方项目',keywords=['PPT'],sources=['rss']))
+    run=asyncio.run(RadarRunService(repo,Registry()).run(uid,radar.id,repo.create_run(radar.id).id))
+    assert run.status == 'completed'
+    evidence=repo.list_evidence(uid)
+    assert len(evidence) == 1
+    assert not evidence[0].assessment['actionable_candidate']
+    assert not repo.list_opportunities(uid)

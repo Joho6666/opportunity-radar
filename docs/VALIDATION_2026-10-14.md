@@ -4,11 +4,12 @@
 
 - `c903708`：精确端点价格核实收据、计费账本保存收据、RSS发布时间修复与来源响应状态。
 - `3f49753`：独立需求判断、事实与关闭状态回归、本地SetFit影子层、人工标注导出和分组评测。
+- 最后复核：普通Radar保留已关闭证据但不再创建销售候选，新增回归通过。
 - `e07b3ac`：差异化套餐、报价预览/版本/并发保护、追加跟进与今日/逾期筛选。
 
 | 验证层 | 本轮结果 | 范围和限制 |
 |---|---|---|
-| 完整后端pytest | **319 passed，0 skipped** | PostgreSQL/pgvector54329、Redis6379、migration/RLS/租户隔离、付费并发/幂等/错误配额、来源契约、关闭阻断、报价并发持久化；Starlette有1条上游弃用警告 |
+| 完整后端pytest | **320 passed，0 skipped** | PostgreSQL/pgvector54329、Redis6379、migration/RLS/租户隔离、付费并发/幂等/错误配额、来源契约、关闭阻断、报价并发持久化；Starlette有1条上游弃用警告 |
 | TypeScript | 通过 | `npm run typecheck`；忽略可选Python依赖和隔离输出目录 |
 | ESLint | 通过 | `npm run lint`；排除生成物和Python虚拟环境，业务代码检查保留 |
 | Vitest | **36 passed** | 10文件；Node环境Zustand存储不可用警告，无测试失败 |

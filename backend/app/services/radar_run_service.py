@@ -210,7 +210,7 @@ class RadarRunService:
                     for keyword in stored.keywords[:3]:
                         trend_keywords[keyword] += 1
                 evidence = evidence_by_url.get(item.url) or evidence_by_url.get(item.url + "/")
-                if evidence and evidence.category != "buyer":
+                if evidence and (evidence.category != "buyer" or not evidence.assessment["actionable_candidate"]):
                     analysis.is_opportunity = False
                 if analysis.is_opportunity:
                     cluster = cluster_state.clusters[cluster_id]
