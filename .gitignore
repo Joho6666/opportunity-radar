@@ -1,5 +1,6 @@
 node_modules/
 .next/
+.next-dev/
 backend/.venv/
 backend/.pytest_cache/
 __pycache__/

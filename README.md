@@ -2,7 +2,7 @@
 
 个人优先的公开商机情报与获客工作台。保留 Next.js 15 与 FastAPI：采集 → 证据 → 分类预测 → 人工核实 → Opportunities / Pipeline → 报价与沟通草案 → 人工跟进 → 实际结果反馈。
 
-当前能力和限制：[CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)；本轮升级：[docs/PRODUCTION_UPGRADE.md](docs/PRODUCTION_UPGRADE.md)；长期方向：[MONEY_INTELLIGENCE_ROADMAP.md](MONEY_INTELLIGENCE_ROADMAP.md)。没有数据时显示暂无数据；任何分类分数均不代表成交概率。
+当前能力和限制：[CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)；生产升级：[docs/PRODUCTION_UPGRADE.md](docs/PRODUCTION_UPGRADE.md)；TikHub 累计额度与关键词回放：[docs/TIKHUB_DEBUGGING.md](docs/TIKHUB_DEBUGGING.md)；长期方向：[MONEY_INTELLIGENCE_ROADMAP.md](MONEY_INTELLIGENCE_ROADMAP.md)。没有数据时显示暂无数据；任何分类分数均不代表成交概率。
 
 ## 本机使用（持久化、付费关闭）
 
@@ -54,6 +54,8 @@ Compose 包括 pgvector PostgreSQL、迁移、API、Redis AOF、Arq Worker 和 S
 真实 TikHub、Firecrawl、LLM 和 embedding 默认 `PAID_API_ENABLED=false`。配置密钥不等于授权。必须先由管理员确认启用、配置保守 USD 单价，再在 Settings 保存 evidence、assistant 或所属 Radar ID 的 provider 范围、单次和每日请求/费用额度，以及独立定时授权。AI 第二层分类另需 ENABLE_AI_CLASSIFICATION=true、LLM_FAST_MODEL；低置信或高价值冲突才升级 LLM_MODEL。
 
 每日额度按 UTC。并发调用由 PostgreSQL 原子预留；错误不退还预留，付费不自动重试。额度是保守上限，实际成本只有服务商明确报告才记录，否则未知。支持 API 查询 `/api/billing/status` 与 `/api/billing/authorizations/{scope}`。数据库或授权缺失拒绝调用，不退回内存模式。自动数据保留删除默认关闭，只有显式 ALLOW_RETENTION_DELETE=true 才执行。
+
+配置 `PAID_BATCH_ID` 时，人工采集另受 PostgreSQL 累计批次约束，跨日和重启不补充。`TIKHUB_ENDPOINT_PRICES_JSON` 按官方端点单价配置；显式 `{}` 阻止全部 TikHub 请求。付费采集必须带 `request_id`，同一请求重试不再次付费。当前本轮单价未核实，密钥已本机导入但实采仍关闭。
 
 ## 验证
 

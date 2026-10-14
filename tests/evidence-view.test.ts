@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { EvidenceRecord } from "@/lib/evidence-client";
-import { authorOf, countBy, sourceOf, sourcesIn, draftOpportunity, parseBudget, reasonLabel, statusOf, visibleRecords } from "@/lib/evidence-view";
+import { authorOf, countBy, sourceOf, sourcesIn, draftOpportunity, parseBudget, reasonLabel, statusOf, visibleRecords, evidenceBudgetLabel } from "@/lib/evidence-view";
 
 function record(id: string, overrides: Partial<EvidenceRecord> = {}): EvidenceRecord {
   return { evidence_id: id, source: "tiktok", url: `https://example.test/${id}`, raw_text: `text ${id}`, published_at: null, captured_at: "2026-10-13T00:00:00Z", category: "buyer", payment_signal: null, verification_status: "unverified", ...overrides };
 }
 
 describe("evidence view helpers", () => {
+  it("shows only source-extracted budgets and leaves absent currency unknown", () => {
+    expect(evidenceBudgetLabel(record("a",{payment_signal:"预算"}))).toBe("预算未知");
+    expect(evidenceBudgetLabel(record("b",{metadata:{facts:JSON.stringify({budget_min:500,budget_max:800,currency:"USD"})}}))).toBe("预算 USD 500–800");
+    expect(evidenceBudgetLabel(record("c",{metadata:{facts:JSON.stringify({budget_min:2000,budget_max:2000,currency:null})}}))).toBe("预算 币种未知 2000");
+  });
   it("translates rule reason codes and keeps unknown ones", () => {
     expect(reasonLabel("seller_self_promotion")).toBe("卖方自荐，不是买方");
     expect(reasonLabel("custom_code")).toBe("custom_code");

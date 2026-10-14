@@ -3,6 +3,7 @@ import {
   buildEvidenceQuery,
   parseEvidenceImport,
   type EvidenceRecord,
+  collectionAttempt,
 } from "@/lib/evidence-client";
 
 describe("evidence client parsing", () => {
@@ -39,5 +40,12 @@ describe("evidence client parsing", () => {
     expect(buildEvidenceQuery("market", 25)).toBe(
       "/api/intelligence/evidence?category=market&limit=25",
     );
+  });
+
+  it("reuses identity for retries and changes it for another keyword or page", () => {
+    const first = collectionAttempt(null, "xiaohongshu", "PPT", undefined, "batch1");
+    expect(collectionAttempt(first, "xiaohongshu", "PPT", undefined, "batch1").requestId).toBe(first.requestId);
+    expect(collectionAttempt(first, "xiaohongshu", "Word", undefined, "batch1").requestId).not.toBe(first.requestId);
+    expect(collectionAttempt(first, "xiaohongshu", "PPT", "page2", "batch1").requestId).not.toBe(first.requestId);
   });
 });

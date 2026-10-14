@@ -21,7 +21,10 @@ def acquisition_metrics(repo,user_id):
         row=source[record.source];row["evidence"]+=1
         if record in buyer:row["buyer"]+=1
         if record in verified:row["verified_buyer"]+=1
+    for name, stats in collection.get("sources",{}).items():
+        source[name].update(stats)
     for row in source.values():
+        row.setdefault("collected",0)
         row["buyer_ratio"]=round(row["buyer"]/row["evidence"],4) if row["evidence"] else None
     return {"measurement":"tenant records; counts are unique evidence and recorded stage timestamps; day boundary UTC",
             "today_unique_evidence":sum(x.captured_at.astimezone(UTC).date() == today for x in evidence),

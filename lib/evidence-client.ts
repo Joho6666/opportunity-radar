@@ -66,13 +66,32 @@ export const FEED_PRESETS = [
   { label: "V2EX 酷工作", url: "https://www.v2ex.com/feed/jobs.xml" },
   { label: "V2EX 远程", url: "https://www.v2ex.com/feed/remote.xml" },
 ] as const;
+export const KEYWORD_PRESETS: { group: string; source: EvidenceSource; query: string }[] = [
+  {group:"个人文档",source:"xiaohongshu",query:"找人做PPT"},
+  {group:"个人文档",source:"weibo",query:"求助 Word排版"},
+  {group:"个人文档",source:"xiaohongshu",query:"找人修改简历"},
+  {group:"个人文档",source:"xiaohongshu",query:"论文格式检查"},
+  {group:"企业视频与开发",source:"douyin",query:"找人剪视频"},
+  {group:"企业视频与开发",source:"xiaohongshu",query:"找人制作商品宣传片"},
+  {group:"企业视频与开发",source:"xiaohongshu",query:"找人开发小程序"},
+  {group:"企业视频与开发",source:"weibo",query:"找人做网站"},
+];
+export type CollectionAttempt = { fingerprint: string; requestId: string };
+export function collectionAttempt(previous: CollectionAttempt | null, source: EvidenceSource, query: string, cursor?: string, batchId?: string): CollectionAttempt {
+  const fingerprint = JSON.stringify([source,query.trim(),cursor ?? null,batchId ?? null]);
+  return previous?.fingerprint === fingerprint ? previous : {fingerprint,requestId:crypto.randomUUID()};
+}
+export type SourceYield = {collected:number;evidence:number;buyer:number;verified_buyer:number;buyer_ratio:number|null};
+export type AcquisitionMetrics = {source_yield:Record<string,SourceYield>};
 export type EvidenceRuntime = {
   paid_api_enabled?: boolean;
+  billing_batch_id?: string | null;
+  billing_batch?: {remaining_requests:number;remaining_cost_usd:number;enabled:boolean} | null;
   storage_mode: "memory" | "postgres";
   warning: string | null;
-  sources: Record<EvidenceSource, { configured: boolean }>;
+  sources: Record<EvidenceSource, { configured: boolean; estimated_request_cost_usd?: number | null }>;
 };
-export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; fetched: number; rejected: number; warning: string | null };
+export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; billing_batch_id?:string|null;request_id?:string|null; fetched: number; rejected: number; stale?:number; warning: string | null };
 
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8011";
 
@@ -134,11 +153,14 @@ export async function fetchEvidenceRuntime(): Promise<EvidenceRuntime> {
   return request<EvidenceRuntime>("/api/intelligence/evidence/runtime");
 }
 
-export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean, cursor?: string): Promise<EvidenceCollectResult> {
+export async function fetchAcquisitionMetrics(): Promise<AcquisitionMetrics> {
+  return request<AcquisitionMetrics>("/api/dashboard/acquisition");
+}
+export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean, cursor?: string, requestId?: string, batchId?:string|null): Promise<EvidenceCollectResult> {
   const params = new URLSearchParams({ source, query });
   return request<EvidenceCollectResult>(`/api/intelligence/evidence/collect?${params.toString()}`, {
     method: "POST",
-    body: JSON.stringify({ manual_confirmed: manualConfirmed, ...(cursor ? {cursor} : {}) }),
+    body: JSON.stringify({ manual_confirmed: manualConfirmed, ...(cursor ? {cursor} : {}), ...(requestId ? {request_id:requestId} : {}), ...(batchId ? {billing_batch_id:batchId} : {}) }),
   });
 }
 

@@ -577,7 +577,8 @@ class PostgresRepository:
     def collection_counts(self,user_id):
         with self._conn() as conn:
             row=conn.execute(text("SELECT COALESCE(sum(fetched),0) collected,COALESCE(sum(fetched) FILTER(WHERE created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),0) today FROM collection_receipts WHERE user_id=CAST(:uid AS uuid)"),{"uid":as_uuid(user_id)}).mappings().one()
-        return {key:int(value) for key,value in row.items()}
+            sources=conn.execute(text("SELECT source,sum(fetched) collected,sum(duplicates) duplicates,sum(stale) stale FROM collection_receipts WHERE user_id=CAST(:uid AS uuid) GROUP BY source"),{"uid":as_uuid(user_id)}).mappings().all()
+        return {**{key:int(value) for key,value in row.items()}, "sources":{entry["source"]:{key:int(entry[key]) for key in ("collected","duplicates","stale")} for entry in sources}}
 
     def scanned_count(self, user_id: str) -> int:
         with self._conn() as conn:

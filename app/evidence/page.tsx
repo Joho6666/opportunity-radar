@@ -13,8 +13,11 @@ import {
   BILLABLE_SOURCES,
   EVIDENCE_SOURCES,
   FEED_PRESETS,
+  KEYWORD_PRESETS,
   SOURCE_LABELS,
   collectEvidence,
+  collectionAttempt,
+  fetchAcquisitionMetrics,
   convertEvidence,
   fetchEvidence,
   fetchEvidenceRuntime,
@@ -26,6 +29,8 @@ import {
   type EvidenceReviewInput,
   type EvidenceRuntime,
   type EvidenceSource,
+  type CollectionAttempt,
+  type AcquisitionMetrics,
 } from "@/lib/evidence-client";
 import {
   CATEGORY_LABELS,
@@ -34,6 +39,7 @@ import {
   authorOf,
   countBy,
   draftOpportunity,
+  evidenceBudgetLabel,
   gradeOf,
   parseBudget,
   reasonLabel,
@@ -170,7 +176,7 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
   const converted = typeof record.converted_opportunity_id === "string" && record.converted_opportunity_id;
   const urgency = typeof record.urgency_signal === "string" ? record.urgency_signal : null;
   const confidence = typeof record.classification_confidence === "number" ? Math.round(record.classification_confidence * 100) : null;
-  const published = shortDate(record.published_at) ?? shortDate(record.captured_at);
+  const published = shortDate(record.published_at);
 
   return (
     <article
@@ -192,12 +198,13 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
             <span className="ml-auto flex items-center gap-2 text-muted">
               <span className={cn("rounded-full border px-2 py-0.5 font-medium", src.tone)}>{src.label}</span>
               {author && <span className="max-w-32 truncate" title={`作者：${author}`}>@{author}</span>}
-              {published && <span className="mono">{published}</span>}
+              <span className="mono">{published ? `发布 ${published}` : "发布时间未知"}</span>
               <a href={record.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="inline-flex items-center gap-1 text-indigo-200 hover:text-white">原文 <ExternalLink size={12} /></a>
               <button type="button" onClick={(event) => { event.stopPropagation(); void navigator.clipboard?.writeText(record.url).then(() => setCopied(true)); setTimeout(() => setCopied(false), 1500); }} className="text-muted hover:text-mist">{copied ? "已复制" : "复制链接"}</button>
             </span>
           </div>
           {record.metadata?.needs_review === "true" && <p className="mt-2 text-xs text-amber-200">存在分类冲突或原文更新，请重新核实；最新规则分类：{String(record.metadata.latest_predicted_category ?? record.category)}</p>}
+          <p className="mt-2 text-xs text-muted">{evidenceBudgetLabel(record)} · 需求真实性：{status === "verified" ? "人工已核实" : "待人工核实"} · 采集 {shortDate(record.captured_at)}</p>
           <p className={cn("mt-2 whitespace-pre-line text-[15px] leading-7 text-slate-100", !selected ? "line-clamp-2" : !expanded && "line-clamp-6")}>{record.raw_text}</p>
           {selected && long && <button type="button" onClick={(event) => { event.stopPropagation(); setExpanded((value) => !value); }} className="mt-1 text-xs text-indigo-200 hover:text-white">{expanded ? "收起" : "展开全文"}</button>}
           {(record.payment_signal || urgency || engagement) && (
@@ -253,6 +260,9 @@ function EvidenceInbox() {
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [runtime, setRuntime] = useState<EvidenceRuntime | null>(null);
+  const [metrics, setMetrics] = useState<AcquisitionMetrics | null>(null);
+  const [billingRevision, setBillingRevision] = useState(0);
+  const attemptRef = useRef<CollectionAttempt | null>(null);
   const [collectorOpen, setCollectorOpen] = useState(false);
   const [source, setSource] = useState<EvidenceSource>("rss");
   const [query, setQuery] = useState("");
@@ -287,16 +297,19 @@ function EvidenceInbox() {
     setLoading(true);
     setError(null);
     try {
-      const [groups, nextRuntime] = await Promise.all([
+      const [groups, nextRuntime, nextMetrics] = await Promise.all([
         Promise.all(EVIDENCE_CATEGORIES.map((item) => fetchEvidence(item, 500))),
         fetchEvidenceRuntime(),
+        fetchAcquisitionMetrics(),
       ]);
       const next = groups.flat();
       setRecords(next);
       setRuntime(nextRuntime);
+      setMetrics(nextMetrics);
       if (!next.length) setCollectorOpen(true);
     } catch (reason) {
       setRecords([]);
+      setMetrics(null);
       setError(reason instanceof Error ? reason.message : "加载证据失败");
     } finally {
       setLoading(false);
@@ -407,15 +420,20 @@ function EvidenceInbox() {
     setCollecting(true);
     setCollectState(null);
     try {
-      const result = await collectEvidence(source, query.trim(), manualConfirmed, cursor);
+      const attempt = collectionAttempt(attemptRef.current,source,query,cursor,runtime?.billing_batch_id ?? undefined);
+      attemptRef.current = attempt;
+      const result = await collectEvidence(source, query.trim(), manualConfirmed, cursor, attempt.requestId,runtime?.billing_batch_id);
+      attemptRef.current = null;
       setNextPage(result.next_cursor ? {source,query:query.trim(),cursor:result.next_cursor} : null);
       setManualConfirmed(false);
-      setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，拒绝 ${result.rejected} 条`);
+      setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，过期 ${result.stale ?? 0} 条，拒绝 ${result.rejected} 条`);
       await load();
     } catch (reason) {
       setCollectState(reason instanceof Error ? reason.message : "采集失败");
     } finally {
       setCollecting(false);
+      setBillingRevision(value => value + 1);
+      void fetchEvidenceRuntime().then(setRuntime).catch(() => setRuntime(null));
     }
   }
 
@@ -443,6 +461,8 @@ function EvidenceInbox() {
   }
 
   const billable = BILLABLE_SOURCES.has(source);
+  const requestPrice = runtime?.sources[source]?.estimated_request_cost_usd;
+  const paidBlocked = billable && (!manualConfirmed || !runtime?.paid_api_enabled || !requestPrice || (runtime.billing_batch && (!runtime.billing_batch.enabled || runtime.billing_batch.remaining_requests < 1 || runtime.billing_batch.remaining_cost_usd < requestPrice)));
 
   return (
     <>
@@ -456,7 +476,8 @@ function EvidenceInbox() {
         </div>}
       />
 
-      <BillingPanel />
+      <BillingPanel refreshKey={billingRevision} />
+      {metrics && <Panel className="mb-4 overflow-x-auto p-4"><h2 className="mb-2 font-semibold">来源获客漏斗</h2>{Object.keys(metrics.source_yield).length ? <table className="w-full text-left text-xs"><thead><tr className="text-muted"><th className="p-2">来源</th><th className="p-2">采集</th><th className="p-2">唯一证据</th><th className="p-2">买方候选</th><th className="p-2">人工核实买方</th></tr></thead><tbody>{Object.entries(metrics.source_yield).map(([name,row]) => <tr key={name} className="border-t border-line"><td className="p-2">{SOURCE_LABELS[name as EvidenceSource] ?? name}</td><td className="p-2">{row.collected}</td><td className="p-2">{row.evidence}</td><td className="p-2">{row.buyer}</td><td className="p-2">{row.verified_buyer}</td></tr>)}</tbody></table> : <p className="text-sm text-muted">暂无数据</p>}<p className="mt-2 text-xs text-muted">买方候选是分类判断，人工核实由你查看公开原文后记录。</p></Panel>}
       {runtime?.warning && <p className="mb-4 rounded-md border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">{runtime.warning}</p>}
 
       {collectorOpen && <Panel className="mb-4 p-4">
@@ -469,12 +490,15 @@ function EvidenceInbox() {
             {EVIDENCE_SOURCES.map((item) => <option key={item} value={item} disabled={runtime ? !runtime.sources[item]?.configured : false}>{SOURCE_LABELS[item]}{BILLABLE_SOURCES.has(item) ? " · 收费" : ""}{runtime && !runtime.sources[item]?.configured ? "（未配置）" : ""}</option>)}
           </select>
           <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} placeholder={source === "rss" ? "RSS 地址，或点下面的预设" : "搜索词，回车开始；问句更容易搜到买家，如「有人接剪辑吗」"} aria-label="搜索词" className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-ai" />
-          <Button type="submit" disabled={collecting || !runtime?.sources[source]?.configured || (billable && (!manualConfirmed || !runtime?.paid_api_enabled))}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
+          <Button type="submit" disabled={collecting || !runtime?.sources[source]?.configured || !!paidBlocked}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
         </form>
         {source === "rss" && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">免费预设：{FEED_PRESETS.map((preset) => <button key={preset.url} type="button" onClick={() => setQuery(preset.url)} className={cn("rounded border px-2 py-0.5 transition", query === preset.url ? "border-ai/60 text-indigo-100" : "border-line hover:text-mist")}>{preset.label}</button>)}</div>}
+        {["个人文档","企业视频与开发"].map(group => <div key={group} className="mt-2 flex flex-wrap gap-2 text-xs text-muted"><span>{group}：</span>{KEYWORD_PRESETS.filter(x => x.group === group).map(preset => <button type="button" key={preset.query} className="rounded border border-line px-2 py-1 hover:text-mist" onClick={() => {setSource(preset.source);setQuery(preset.query);setManualConfirmed(false);}}>{preset.query}</button>)}</div>)}
+        {billable && <p className="mt-2 text-xs text-amber-100">{requestPrice ? `此接口已核实单价 $${requestPrice.toFixed(4)} / 次；单击仅取一页。` : "接口价格未核实，付费采集被阻止。"}</p>}
         {billable && <label className="mt-2 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />该来源按调用收费，我确认本次采集</label>}
-        {nextPage && nextPage.source === source && nextPage.query === query.trim() && <Button className="mt-3" variant="secondary" disabled={collecting || (billable && (!manualConfirmed || !runtime?.paid_api_enabled))} onClick={() => void collect(nextPage.cursor)}>采集下一页（独立请求）</Button>}
+        {nextPage && nextPage.source === source && nextPage.query === query.trim() && <Button className="mt-3" variant="secondary" disabled={collecting || !!paidBlocked} onClick={() => void collect(nextPage.cursor)}>采集下一页（独立请求）</Button>}
         {collectState && <p className="mt-2 text-sm text-muted">{collectState}</p>}
+        {collectState && attemptRef.current && <Button className="mt-2" variant="secondary" onClick={() => {attemptRef.current=null;setManualConfirmed(false);setCollectState("已准备新的请求；如需付费，请重新确认，新的调用会占用额度。");}}>准备新的采集请求</Button>}
       </Panel>}
 
       {importOpen && <Panel className="mb-4 p-4">

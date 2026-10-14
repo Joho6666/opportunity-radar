@@ -20,7 +20,7 @@ export const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 ];
 
 const REASONS: Record<string, string> = {
-  explicit_request_budget_deadline: "明确求助，带预算或时限",
+  explicit_request_budget_deadline: "公开求助或项目需求，预算与时限需看原文",
   audience_question_or_howto: "受众提问或求教程",
   content_or_trend_without_buying_intent: "内容或趋势，无购买意图",
   seller_self_promotion: "卖方自荐，不是买方",
@@ -134,4 +134,17 @@ export function parseBudget(value: string): number | null | "invalid" {
   if (!trimmed) return null;
   const number = Number(trimmed);
   return Number.isInteger(number) && number >= 0 ? number : "invalid";
+}
+
+export function evidenceBudgetLabel(record: EvidenceRecord): string {
+  try {
+    const facts = JSON.parse(String(record.metadata?.facts ?? "{}")) as {budget_min?:number|null;budget_max?:number|null;currency?:string|null};
+    const manual = record.metadata?.budget_min !== undefined || record.metadata?.budget_max !== undefined;
+    const low = manual ? parseBudget(String(record.metadata?.budget_min ?? "")) : facts.budget_min;
+    const high = manual ? parseBudget(String(record.metadata?.budget_max ?? "")) : facts.budget_max;
+    const values = [low,high].filter((value):value is number => typeof value === "number" && Number.isFinite(value) && value>=0);
+    if (!values.length) return "预算未知";
+    const range = values.length===2 && values[0]!==values[1] ? `${values[0]}–${values[1]}` : String(values[0]);
+    return `${manual ? "人工记录预算" : "预算"} ${facts.currency || "币种未知"} ${range}`;
+  } catch { return "预算未知"; }
 }

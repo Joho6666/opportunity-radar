@@ -1,6 +1,6 @@
 # Opportunity Radar 当前架构
 
-审计基线：2026-10-13，main `7f6e7c4`，证据分支 `1d34837`（领先 17 次提交）。本轮在独立 `feat/production-acquisition-loop` 开发，未合并 main。历史目标架构见 MONEY_INTELLIGENCE_ROADMAP，本文件描述实际实现。
+审计基线：2026-10-13，main `7f6e7c4`，证据分支 `1d34837`（领先 17 次提交）。TikHub 本轮起点 `4e2f2b2`；继续在独立 `feat/production-acquisition-loop` 开发，未合并 main。历史目标架构见 MONEY_INTELLIGENCE_ROADMAP，本文件描述实际实现。
 
 ```mermaid
 flowchart TB
@@ -12,6 +12,9 @@ flowchart TB
  FREE[公开 GitHub / HN / RSS]
  PAID[TikHub / Firecrawl / LLM / Embedding]
  BILL[统一服务端计费网关：默认关闭、范围与定时授权、原子预留、每日/单次限额]
+ BATCH[PostgreSQL 调试批次：累计 5 次 / USD 0.50 / 单次 0.10]
+ RECEIPT[采集请求幂等收据 + 解析前脱敏响应 + 服务端分页会话]
+ REPLAY[只读离线回放与人工标签评测：不写业务漏斗]
  HTTP[HTTP：DNS 连接时校验、固定 IP、限速/退避、熔断]
  RAW[RawItem：原文/链接/作者/发布时间/更新时间]
  RULE[五类规则：buyer / seller / job / content / market]
@@ -25,6 +28,9 @@ flowchart TB
  SCH --> QUEUE --> RAW
  FREE --> HTTP --> RAW
  PAID --> BILL --> HTTP
+ BILL --> BATCH --> PG
+ HTTP --> RECEIPT --> PG
+ RECEIPT --> REPLAY
  RAW --> RULE --> AI --> EVID --> SCORE --> CRM
  API --> EVID
  API --> CRM
@@ -40,6 +46,8 @@ flowchart TB
 - PostgreSQL 是实际模式的存储。内存只适用于显式开发/测试，生产启动拒绝内存、Mock、免登录和 fake-IP DNS。前端 Mock 也必须显式开启，生产保护页仍需登录。
 - 前端生产忽略 Mock 和免登录开关，使用正式会话 token。API 模式不从共享浏览器缓存恢复机会、雷达或画像，只保留本机技能偏好；旧演示/其他用户缓存不能在 API 失败时成为业务数据。全局数据错误显示重试入口，初始化错误不成为未处理异常。
 - 计费由数据库账户锁串行检查并原子预留。未配置价格、授权、持久化上下文或定时授权则拒绝。失败不释放额度；付费传输与 Worker 不自动重试。真实费用未知保留 null，预留上限不冒充账单。
+- 本轮调试批次为额外累计限制，不随 UTC 跨日或重启恢复；只允许 TikHub 指定来源的人工 evidence 范围。端点价格表缺项拒绝，不把未知当免费。付费手动请求必须带幂等 ID；空页/过期页的有效会话仍保留，续页由服务器保存并绑定 tenant/source/query。
+- HTTP 响应在解析前脱敏存档并关联费用收据。离线回放冻结采集时间、不发送请求、不写业务数据、不标记已核实。下一步真实接口和分类评测以保存样本为依据。
 - 迁移账本逐文件检查 SHA256，只执行新增迁移。历史文件不改写；已有无账本数据库拒绝自动接管。
 - AUTH_DISABLED 后端仅开发直连 loopback，拒绝所有转发头；Docker 和公网反向代理使用 JWT。本机开发 Next 必须绑定 loopback，其开发 UI 入口不替代 API 身份检查。
 - Repository 所有公开业务操作限定 user。Compose 的 postgres 服务账号绕过 RLS，因此 Repository 是服务端边界；非超级用户契约测试单独验证数据库 RLS。生产应使用专用后端角色并避免暴露数据库。
@@ -55,11 +63,11 @@ flowchart TB
 | GitHub | 仓库搜索、`issues:` 公开开放 Issue、page 分页、更新时间 | 本轮真实免费 Issue 响应解析验证；仓库原有契约测试 |
 | Hacker News | 帖子、`comments:` 评论、page 分页、父帖关系 | 本轮真实免费评论响应解析验证 |
 | RSS | 合法公开订阅、时间、链接 | 离线契约测试；没有本轮真实 RSS 探针 |
-| TikTok / 抖音 / 小红书 / 微博 / 知乎 | TikHub adapter、时间与类型、国内显式游标、抖音带 ID 评论独立归属 | 合成响应契约；未获真实付费验证授权，不能称官方 schema 已确认 |
+| TikTok / 抖音 / 小红书 / 微博 / 知乎 | TikHub adapter、时间与类型、服务端会话续页、抖音带 ID 评论独立归属 | 合成响应契约；已授权本轮小批次但官方端点单价未确认，实际请求 0，不能称 schema 或密钥已实证 |
 | Web Search | Firecrawl 搜索 | 离线契约；真实付费禁用 |
 
 续页必须手动请求并再次确认收费。跨运行唯一身份和已出现记录更新已实现；长期 watermark、自动断点恢复、跨进程共享来源熔断尚未完成。用户核实和真实联系/成交必须由本人执行。
 
 ## 部署和验证
 
-参见 [README](README.md)、[本轮审计与交付](docs/PRODUCTION_UPGRADE.md)。CI 覆盖 `feat/**` push 与全部 PR：前端四项、真实 PostgreSQL/pgvector 与 Redis 契约、重复迁移、Compose 健康与重启持久化。真实生产 Supabase 登录端到端、付费模型/国内 API 和客户转化仍需单独验收。
+参见 [README](README.md)、[生产升级审计](docs/PRODUCTION_UPGRADE.md)、[TikHub 受限采集与回放](docs/TIKHUB_DEBUGGING.md)。CI 覆盖 `feat/**` push 与全部 PR：前端四项、真实 PostgreSQL/pgvector 与 Redis 契约、重复迁移、Compose 健康与重启持久化。真实生产 Supabase 登录端到端、付费模型/国内 API 和客户转化仍需单独验收。

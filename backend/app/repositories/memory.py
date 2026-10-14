@@ -226,7 +226,11 @@ class MemoryRepository:
     def collection_counts(self,user_id):
         from datetime import UTC
         rows=[r for r in self.collection_receipts.values() if r["user_id"] == user_id]
-        return {"collected":sum(r["fetched"] for r in rows),"today":sum(r["fetched"] for r in rows if r["created_at"].date() == datetime.now(UTC).date())}
+        sources={}
+        for row in rows:
+            stats=sources.setdefault(row["source"],{"collected":0,"duplicates":0,"stale":0})
+            stats["collected"]+=row["fetched"];stats["duplicates"]+=row["duplicates"];stats["stale"]+=row["stale"]
+        return {"collected":sum(r["fetched"] for r in rows),"today":sum(r["fetched"] for r in rows if r["created_at"].date() == datetime.now(UTC).date()),"sources":sources}
 
     def scanned_count(self, user_id: str) -> int:
         return sum(run.stats.items_found for run in self.runs_of_user(user_id))
