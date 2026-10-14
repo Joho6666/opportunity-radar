@@ -37,7 +37,7 @@ def raw_items_to_evidence_batch(*, source: str, query: str, items: list[RawItem]
             "urgency_signal": classification.urgency_signal,
             "metadata": metadata,
             "evidence_grade": classification.evidence_grade,
-            "classification_source": "rule_v2",
+            "classification_source": "rule_v3",
             "classification_reason": classification.reason_code,
             "classification_confidence": classification.confidence,
         })

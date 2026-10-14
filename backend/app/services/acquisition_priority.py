@@ -22,4 +22,6 @@ def priority(evidence, *, skills=(), minimum_budget=0, published_at=None, estima
         "证据可信度":(confidence,evidence.evidence_grade+" 级证据；"+("发布时间未知" if age is None else f"来源活动距今 {max(0,age):.0f} 小时"),.15),
     }
     score=round(sum(value*weight for value,_,weight in dimensions.values()))
-    return {"kind":"prediction","score":score,"verification":evidence.verification_status,"factors":{name:{"score":value,"reason":reason,"weight":weight} for name,(value,reason,weight) in dimensions.items()},"reasons":[f"{name} {value:.0f}/100：{reason}" for name,(value,reason,_) in dimensions.items()]}
+    assessment=evidence.assessment
+    if not assessment["actionable_candidate"]:score=0
+    return {"kind":"prediction","score":score,"assessment":assessment,"verification":evidence.verification_status,"factors":{name:{"score":value,"reason":reason,"weight":weight} for name,(value,reason,weight) in dimensions.items()},"reasons":[f"{name} {value:.0f}/100：{reason}" for name,(value,reason,_) in dimensions.items()]+([assessment["reason"]] if not assessment["actionable_candidate"] else [])}

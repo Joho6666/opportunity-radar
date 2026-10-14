@@ -2,6 +2,13 @@ import { getAccessToken } from "@/lib/auth";
 
 export const EVIDENCE_CATEGORIES = ["buyer", "seller", "job", "content", "market"] as const;
 export type EvidenceCategory = (typeof EVIDENCE_CATEGORIES)[number];
+export type DemandAssessment = {
+  availability: "open" | "closed" | "unknown";
+  payment: "explicit" | "unknown" | "no_budget" | "conflicting";
+  eligibility: "eligible" | "excluded" | "needs_review";
+  availability_quote?: string | null; payment_quote?: string | null; eligibility_quote?: string | null;
+  reason?: string; actionable_candidate: boolean;
+};
 
 export type EvidenceRecord = {
   evidence_id: string;
@@ -19,6 +26,7 @@ export type EvidenceRecord = {
   source_platform?: string;
   acquisition_tool?: string;
   metadata?: Record<string, unknown>;
+  assessment?: DemandAssessment;
   [key: string]: unknown;
 };
 
@@ -89,7 +97,7 @@ export type EvidenceRuntime = {
   billing_batch?: {remaining_requests:number;remaining_cost_usd:number;enabled:boolean} | null;
   storage_mode: "memory" | "postgres";
   warning: string | null;
-  sources: Record<EvidenceSource, { configured: boolean; estimated_request_cost_usd?: number | null }>;
+  sources: Record<EvidenceSource, { configured: boolean; estimated_request_cost_usd?: number | null; validation_status?: string; live_verified?: boolean; pricing_evidence?: {source_url:string;verified_at:string;unit:string} | null }>;
 };
 export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; billing_batch_id?:string|null;request_id?:string|null; fetched: number; rejected: number; stale?:number; warning: string | null };
 
@@ -164,7 +172,10 @@ export async function collectEvidence(source: EvidenceSource, query: string, man
   });
 }
 
-export type EvidenceReviewInput = { verification_status?: string; category?: EvidenceCategory; notes?: string; title?: string; summary?: string; budget_min?: number | null; budget_max?: number | null };
+export type EvidenceReviewInput = { verification_status?: string; category?: EvidenceCategory; notes?: string; title?: string; summary?: string; budget_min?: number | null; budget_max?: number | null; assessment?: Partial<Pick<DemandAssessment,"availability"|"payment"|"eligibility">>; label_group?: string };
+export async function exportEvidenceLabels():Promise<{rows:unknown[];count:number;target:number}> {
+  return request("/api/intelligence/evidence/labels");
+}
 export async function reviewEvidence(evidenceId: string, input: EvidenceReviewInput): Promise<EvidenceRecord> {
   return request<EvidenceRecord>(`/api/intelligence/evidence/${evidenceId}/review`, { method: "PATCH", body: JSON.stringify(input) });
 }

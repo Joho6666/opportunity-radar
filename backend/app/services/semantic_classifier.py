@@ -17,6 +17,9 @@ class SemanticLabel(BaseModel):
 
 
 async def enrich_batch(batch: EvidenceBatch) -> EvidenceBatch:
+    import asyncio
+    from .local_classifier import enrich_local
+    batch = await asyncio.to_thread(enrich_local, batch)
     settings = get_settings()
     provider = get_provider()
     if not settings.enable_ai_classification or not provider or not settings.llm_fast_model:

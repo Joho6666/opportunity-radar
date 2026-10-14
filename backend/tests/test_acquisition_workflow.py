@@ -85,3 +85,17 @@ def test_worker_replay_does_not_execute_twice():
     first=asyncio.run(service.run(uid,radar.id,run.id));second=asyncio.run(service.run(uid,radar.id,run.id))
     assert first.status == second.status == "completed"
     assert registry.calls == 1
+
+
+def test_synthetic_browser_fixtures_are_excluded_from_acquisition_metrics():
+    from app.services.acquisition_metrics import acquisition_metrics
+    from app.schemas.evidence import EvidenceBatch,EvidenceReview
+    repo=MemoryRepository()
+    _,item=build(repo)
+    record=repo.get_evidence('sales-user',item.evidence_id)
+    repo.upsert_evidence_batch('sales-user',EvidenceBatch(batch_id='synthetic-updated',items=[{'source':record.source,'url':record.url,'external_id':record.external_id,'raw_text':record.raw_text+'（Synthetic QA）','category':'buyer','metadata':{'dataset_kind':'synthetic'}}]))
+    report=acquisition_metrics(repo,'sales-user')
+    assert report['buyer_evidence'] == 0
+    assert report['verified_buyer'] == 0
+    assert report['actual_revenue'] is None
+    assert not report['pipeline_counts']

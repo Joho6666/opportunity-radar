@@ -41,3 +41,10 @@ def test_evidence_requires_verbatim_text_and_http_url():
             batch_id="bad",
             items=[{"source": "cue", "url": "not-a-url", "raw_text": "short"}],
         )
+
+
+def test_import_facts_are_recomputed_from_original_not_supplied_metadata():
+    import json
+    record=normalize_evidence(EvidenceBatch(batch_id='facts-contract',items=[{'source':'rss','url':'https://example.test/facts','raw_text':'需要做个企业网站，预算还没确定。','metadata':{'facts':'{"budget_min":5000,"deadline":"tomorrow"}'}}]))[0]
+    assert json.loads(record.metadata['facts'])['budget_min'] is None
+    assert json.loads(record.metadata['facts'])['deadline'] is None

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://127.0.0.1:3001,http://localhost:3000"
     use_in_memory_store: bool = True
     enable_ai_classification: bool = False
+    local_classifier_mode: Literal["off","shadow","active"] = "shadow"
+    local_classifier_path: str = ""  # Trusted local model directory, never a Hub ID or user request input.
     paid_api_enabled: bool = False
     paid_daily_cost_limit: float = Field(default=1.0,gt=0,allow_inf_nan=False)
     paid_daily_request_limit: int = Field(default=20,ge=1,le=100000)

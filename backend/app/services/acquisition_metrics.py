@@ -4,13 +4,16 @@ from collections import Counter, defaultdict
 
 def acquisition_metrics(repo,user_id):
     # Repository reads are tenant-scoped; source health is not used as customer evidence.
-    evidence=repo.list_evidence(user_id,limit=100000)
-    items=[x for x in repo.list_opportunities(user_id) if x.type != "job"]
+    all_evidence=repo.list_evidence(user_id,limit=100000)
+    synthetic_ids={x.evidence_id for x in all_evidence if x.metadata.get("dataset_kind") == "synthetic"}
+    evidence=[x for x in all_evidence if x.evidence_id not in synthetic_ids]
+    items=[x for x in repo.list_opportunities(user_id) if x.type != "job" and x.evidence_id not in synthetic_ids and x.metadata.get("dataset_kind") != "synthetic"]
     today=datetime.now(UTC).date()
     collection=repo.collection_counts(user_id)
-    buyer=[x for x in evidence if x.category == "buyer" and x.verification_status != "invalidated"]
+    buyer=[x for x in evidence if x.category == "buyer" and x.verification_status != "invalidated" and x.assessment["actionable_candidate"]]
     verified=[x for x in buyer if x.verification_status == "verified"]
-    contactable=[x for x in items if x.verification_status == "verified" and x.status == "ready_to_contact"]
+    evidence_by_id={x.evidence_id:x for x in evidence}
+    contactable=[x for x in items if x.verification_status == "verified" and x.status == "ready_to_contact" and (not x.evidence_id or x.evidence_id in evidence_by_id and evidence_by_id[x.evidence_id].assessment["actionable_candidate"])]
     counts=Counter(x.status for x in items)
     def reached(stage):
         return sum(bool(x.pipeline.get(f"{stage}_at")) or x.status == stage for x in items)

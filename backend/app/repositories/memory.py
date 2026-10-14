@@ -322,6 +322,8 @@ class MemoryRepository:
     def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
         # Synchronous mutation runs as one critical section (no awaits in API).
         evidence = self.get_evidence(user_id, evidence_id)
+        from ..services.demand_qualification import require_actionable
+        require_actionable(evidence)
         if evidence.verification_status != "verified" or evidence.category != "buyer":
             raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
         if evidence.converted_opportunity_id:
@@ -338,13 +340,9 @@ class MemoryRepository:
 
     def review_evidence(self, user_id: str, evidence_id: str, review: EvidenceReview) -> EvidenceRecord:
         record = self.get_evidence(user_id, evidence_id)
+        from ..services.demand_qualification import review_updates
+        stored = review_updates(record, review)
         self.evidence_reviews.append({"user_id":user_id,"evidence_id":evidence_id,"previous":record.model_dump(),"correction":review.model_dump(exclude_none=True)})
-        updates = review.model_dump(exclude_none=True)
-        metadata = dict(record.metadata)
-        for key in ("title","summary","budget_min","budget_max"):
-            if key in updates: metadata[key] = str(updates.pop(key))
-        updates["metadata"] = metadata
-        stored = record.model_copy(update=updates)
         self.evidence[(user_id, record.identity_key)] = stored
         for key, item in self.opportunities.items():
             if item.evidence_id == evidence_id and item in self.list_opportunities(user_id):

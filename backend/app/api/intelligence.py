@@ -235,10 +235,27 @@ async def list_evidence(
 async def review_evidence(evidence_id: str, payload: EvidenceReview, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     return repo.review_evidence(user.id, evidence_id, payload)
 
+
+@router.get("/evidence/labels")
+async def export_labels(user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    from ..services.demand_qualification import text_digest
+    from ..services.label_dataset import content_group
+    rows=[]
+    for record in repo.list_evidence(user.id,limit=100000):
+        if record.metadata.get("dataset_kind") == "synthetic":continue
+        if record.metadata.get("human_label_digest") != text_digest(record.raw_text):continue
+        rows.append({"id":record.evidence_id,"group_id":record.metadata.get("label_group") or record.metadata.get("origin_url") or str(record.url) or content_group(record.raw_text),
+                     "text":record.raw_text,"category":record.category,"source":record.source,"source_url":str(record.url),
+                     "published_at":record.published_at.isoformat() if record.published_at else None,"captured_at":record.captured_at.isoformat(),
+                     "human_label":True,"dataset_kind":"real","assessment":record.assessment})
+    return {"rows":rows,"count":len(rows),"target":250,"usage":"human labels only; review source/repost groups before freezing splits"}
+
 @router.post("/evidence/{evidence_id}/convert", response_model=OpportunityRead)
 async def convert_evidence(evidence_id: str, payload: EvidenceConversion, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     from ..core.errors import AppError
     evidence = repo.get_evidence(user.id, evidence_id)
+    from ..services.demand_qualification import require_actionable
+    require_actionable(evidence)
     if evidence.verification_status != "verified":
         raise AppError("EVIDENCE_NOT_VERIFIED", "只有人工核实的证据才能转为机会。", 409)
     if evidence.category != "buyer":

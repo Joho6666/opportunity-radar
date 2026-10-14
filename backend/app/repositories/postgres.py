@@ -806,6 +806,8 @@ class PostgresRepository:
             if row is None:
                 raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
             evidence = self._evidence_from_row(row)
+            from ..services.demand_qualification import require_actionable
+            require_actionable(evidence)
             if evidence.verification_status != "verified" or evidence.category != "buyer":
                 raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
             if evidence.converted_opportunity_id:
@@ -841,12 +843,9 @@ class PostgresRepository:
             if row is None:
                 raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
             current = self._evidence_from_row(row)
-            data = review.model_dump(exclude_none=True)
-            metadata = dict(current.metadata)
-            for key in ("title", "summary", "budget_min", "budget_max"):
-                if key in data:
-                    metadata[key] = str(data.pop(key))
-            updated = current.model_copy(update={**data,"metadata":metadata})
+            from ..services.demand_qualification import review_updates
+            updated = review_updates(current, review)
+            metadata = updated.metadata
             if updated == current:
                 return current
             conn.execute(text("INSERT INTO evidence_reviews(user_id,evidence_id,previous,correction) VALUES(CAST(:uid AS uuid),CAST(:eid AS uuid),CAST(:previous AS jsonb),CAST(:correction AS jsonb))"), {"uid":uid,"eid":evidence_id,"previous":current.model_dump_json(),"correction":review.model_dump_json(exclude_none=True)})

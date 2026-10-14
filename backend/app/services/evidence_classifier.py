@@ -91,20 +91,25 @@ def classify_tiktok(raw_text: str, *, title: str | None = None, engagement: dict
         return _SELLER_RESULT
     if _ADVICE.search(full) and not ask:
         return _ADVICE_RESULT
+    implicit = re.search(r"需要做(?:个|一|一个)|(?:长期合作|寻.{0,5}团队)",full) and re.search(r"项目|站点|网站|开发|制作|比价|小程序|交付|必备要求",full)
+    if implicit and not _SELLER.search(full) and not _JOB.search(full):
+        return Classification("buyer","implicit_project_request",.7,"B")
     without_seller = _SELLER.sub(" ", full)
     strong = _STRONG_DEMAND.search(without_seller)
     if _SELLER.search(full) and not strong and not ask:
         return _SELLER_RESULT
     if ask or _DEMAND.search(without_seller):
-        money = _MONEY.search(full)
+        from .evidence_facts import payment
+        from .demand_qualification import qualification
+        money = payment(full)["signal"]
         urgency = _URGENT.search(full)
         if ask or money or urgency or strong:
             return Classification(
                 category="buyer",
                 reason_code="explicit_request_budget_deadline",
                 confidence=0.82,
-                evidence_grade="A",
-                payment_signal=money.group(0) if money else None,
+                evidence_grade="A" if money and qualification(full)["actionable_candidate"] else "B",
+                payment_signal=money,
                 urgency_signal=urgency.group(0) if urgency else None,
             )
     if _CONTENT.search(full):

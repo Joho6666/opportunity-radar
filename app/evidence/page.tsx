@@ -21,6 +21,7 @@ import {
   convertEvidence,
   fetchEvidence,
   fetchEvidenceRuntime,
+  exportEvidenceLabels,
   parseEvidenceImport,
   reviewEvidence,
   uploadEvidence,
@@ -171,6 +172,11 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
   const [notes, setNotes] = useState(savedNotes);
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [assessmentOpen,setAssessmentOpen] = useState(false);
+  const [availability,setAvailability] = useState(record.assessment?.availability ?? "unknown");
+  const [payment,setPayment] = useState(record.assessment?.payment ?? "unknown");
+  const [eligibility,setEligibility] = useState(record.assessment?.eligibility ?? "needs_review");
+  const [group,setGroup] = useState(String(record.metadata?.label_group ?? ""));
   useEffect(() => { setNotes(savedNotes); }, [savedNotes]);
   const long = record.raw_text.length > 280;
   const converted = typeof record.converted_opportunity_id === "string" && record.converted_opportunity_id;
@@ -205,6 +211,9 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
           </div>
           {record.metadata?.needs_review === "true" && <p className="mt-2 text-xs text-amber-200">存在分类冲突或原文更新，请重新核实；最新规则分类：{String(record.metadata.latest_predicted_category ?? record.category)}</p>}
           <p className="mt-2 text-xs text-muted">{evidenceBudgetLabel(record)} · 需求真实性：{status === "verified" ? "人工已核实" : "待人工核实"} · 采集 {shortDate(record.captured_at)}</p>
+          {record.assessment && <div className="mt-2 text-xs text-muted"><p>需求状态：{{open:"有效",closed:"已关闭或过期",unknown:"未知"}[record.assessment.availability]} · 支付证据：{{explicit:"原文明确",unknown:"未知",no_budget:"明确无预算",conflicting:"冲突"}[record.assessment.payment]} · 服务适用性：{{eligible:"人工确认适用",excluded:"不适用",needs_review:"待核实"}[record.assessment.eligibility]}</p><p>{record.assessment.reason}</p>{[record.assessment.availability_quote,record.assessment.payment_quote,record.assessment.eligibility_quote].filter(Boolean).map((quote,i)=><p key={i} className="mt-1 text-amber-100">原文依据：{quote}</p>)}</div>}
+          {Boolean(record.metadata?.local_fallback) && <p className="mt-2 text-xs text-muted">本地模型回退规则：{String(record.metadata?.local_fallback)}</p>}
+          {Boolean(record.metadata?.local_category) && <p className="mt-2 text-xs text-muted">本地模型 {String(record.metadata?.local_mode)}：{String(record.metadata?.local_category)} · 置信度 {String(record.metadata?.local_confidence)}{record.metadata?.local_truncated === "true" ? " · 长文截断，需复核" : ""}</p>}
           <p className={cn("mt-2 whitespace-pre-line text-[15px] leading-7 text-slate-100", !selected ? "line-clamp-2" : !expanded && "line-clamp-6")}>{record.raw_text}</p>
           {selected && long && <button type="button" onClick={(event) => { event.stopPropagation(); setExpanded((value) => !value); }} className="mt-1 text-xs text-indigo-200 hover:text-white">{expanded ? "收起" : "展开全文"}</button>}
           {(record.payment_signal || urgency || engagement) && (
@@ -217,7 +226,7 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
 
           <div className="mt-3 flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
             {status !== "verified"
-              ? <Button variant="secondary" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "verified" })}><Check size={13} />核实 {selected && <Kbd>V</Kbd>}</Button>
+              ? <Button variant="secondary" className="min-h-8 px-2.5 text-xs" disabled={record.assessment?.actionable_candidate === false} onClick={() => void onReview({ verification_status: "verified" })}><Check size={13} />核实 {selected && <Kbd>V</Kbd>}</Button>
               : <Button variant="ghost" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "unverified" })}><RotateCcw size={13} />退回待复核</Button>}
             {status !== "invalidated" && <Button variant="secondary" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "invalidated" })}><X size={13} />排除 {selected && <Kbd>X</Kbd>}</Button>}
             {status === "invalidated" && <Button variant="ghost" className="min-h-8 px-2.5 text-xs" onClick={() => void onReview({ verification_status: "unverified" })}><RotateCcw size={13} />恢复</Button>}
@@ -233,13 +242,21 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
               placeholder="备注（离开输入框自动保存）"
               className="h-8 min-w-40 flex-1 rounded border border-line bg-ink px-2 text-xs text-mist outline-none focus:border-ai"
             />
-            {record.category === "buyer" && !converted && status !== "invalidated" && !converting && (
+            {record.category === "buyer" && record.assessment?.actionable_candidate !== false && !converted && status !== "invalidated" && !converting && (
               <Button className="min-h-8 px-2.5 text-xs" onClick={onStartConvert}>
                 <ArrowRight size={13} />{status === "verified" ? "转为机会" : "核实并转为机会"} {selected && <Kbd>C</Kbd>}
               </Button>
             )}
             {converted && <Link href={`/opportunities/${converted}`} className="inline-flex h-8 items-center gap-1 rounded border border-signal/40 px-2.5 text-xs text-signal hover:bg-signal/10">已转为机会 · 查看 <ArrowRight size={12} /></Link>}
           </div>
+          <button className="mt-3 text-xs text-indigo-200" onClick={()=>setAssessmentOpen(x=>!x)}>纠正需求判断与标注分组</button>
+          {assessmentOpen && <form className="mt-2 grid gap-2 text-xs sm:grid-cols-3" onClick={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();void onReview({notes,assessment:{availability,payment,eligibility},...(group ? {label_group:group} : {})});}}>
+            <label>有效状态<select aria-label="需求有效状态" className="mt-1 w-full rounded border border-line bg-ink p-2" value={availability} onChange={e=>setAvailability(e.target.value as typeof availability)}><option value="unknown">未知</option><option value="open">有效</option><option value="closed">已关闭</option></select></label>
+            <label>支付证据<select aria-label="支付证据" className="mt-1 w-full rounded border border-line bg-ink p-2" value={payment} onChange={e=>setPayment(e.target.value as typeof payment)}><option value="unknown">未知</option><option value="explicit">原文明确</option><option value="no_budget">明确无预算</option><option value="conflicting">冲突</option></select></label>
+            <label>服务适用性<select aria-label="服务适用性" className="mt-1 w-full rounded border border-line bg-ink p-2" value={eligibility} onChange={e=>setEligibility(e.target.value as typeof eligibility)}><option value="needs_review">待核实</option><option value="eligible">适用</option><option value="excluded">不适用</option></select></label>
+            <label className="sm:col-span-2">同一原帖、转载或需求使用相同分组<input aria-label="标注分组" className="mt-1 w-full rounded border border-line bg-ink p-2" value={group} onChange={e=>setGroup(e.target.value.slice(0,150))}/></label><Button type="submit" disabled={!notes.trim()}>保存判断与依据</Button>
+            <p className="sm:col-span-3 text-muted">先填写复核备注；原文明确关闭或不适用时不能通过纠正变为有效客户。</p>
+          </form>}
           {converting && <ConvertForm record={record} onCancel={onCancelConvert} onSubmit={onConvert} />}
         </div>
       </div>
@@ -472,6 +489,7 @@ function EvidenceInbox() {
         action={<div className="flex gap-2">
           <Button variant="secondary" className="whitespace-nowrap" onClick={() => setCollectorOpen((value) => !value)}><Search size={15} /> 采集</Button>
           <Button variant="secondary" className="whitespace-nowrap" onClick={() => setImportOpen((value) => !value)}><Upload size={15} /> 导入</Button>
+          <Button variant="secondary" onClick={()=>void exportEvidenceLabels().then(result=>{const href=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:"application/json"}));const a=document.createElement("a");a.href=href;a.download="reviewed-labels.json";a.click();URL.revokeObjectURL(href);showToast({message:`已导出 ${result.count} 条人工标注，目标 ${result.target} 条`});}).catch(e=>showToast({message:e instanceof Error ? e.message : "导出失败"}))}>导出标注</Button>
           <Button variant="ghost" onClick={() => void load()} disabled={loading} aria-label="刷新"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></Button>
         </div>}
       />
@@ -495,6 +513,8 @@ function EvidenceInbox() {
         {source === "rss" && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">免费预设：{FEED_PRESETS.map((preset) => <button key={preset.url} type="button" onClick={() => setQuery(preset.url)} className={cn("rounded border px-2 py-0.5 transition", query === preset.url ? "border-ai/60 text-indigo-100" : "border-line hover:text-mist")}>{preset.label}</button>)}</div>}
         {["个人文档","企业视频与开发"].map(group => <div key={group} className="mt-2 flex flex-wrap gap-2 text-xs text-muted"><span>{group}：</span>{KEYWORD_PRESETS.filter(x => x.group === group).map(preset => <button type="button" key={preset.query} className="rounded border border-line px-2 py-1 hover:text-mist" onClick={() => {setSource(preset.source);setQuery(preset.query);setManualConfirmed(false);}}>{preset.query}</button>)}</div>)}
         {billable && <p className="mt-2 text-xs text-amber-100">{requestPrice ? `此接口已核实单价 $${requestPrice.toFixed(4)} / 次；单击仅取一页。` : "接口价格未核实，付费采集被阻止。"}</p>}
+        {runtime?.sources[source]?.validation_status && <p className="mt-2 text-xs text-muted">来源验证：{({contract_only:"离线契约通过；尚未实采验证",response_compatible:"已存真实响应可解析；分页与业务效果仍需核实",response_incompatible:"已存响应解析不兼容"} as Record<string,string>)[runtime.sources[source].validation_status ?? ""] ?? runtime.sources[source].validation_status}</p>}
+        {runtime?.sources[source]?.pricing_evidence && <p className="mt-1 text-xs text-muted">价格依据：<a href={runtime.sources[source].pricing_evidence?.source_url} target="_blank" rel="noreferrer" className="underline">官方来源</a> · 核实 {shortDate(runtime.sources[source].pricing_evidence?.verified_at)}</p>}
         {billable && <label className="mt-2 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />该来源按调用收费，我确认本次采集</label>}
         {nextPage && nextPage.source === source && nextPage.query === query.trim() && <Button className="mt-3" variant="secondary" disabled={collecting || !!paidBlocked} onClick={() => void collect(nextPage.cursor)}>采集下一页（独立请求）</Button>}
         {collectState && <p className="mt-2 text-sm text-muted">{collectState}</p>}

@@ -25,6 +25,7 @@ const REASONS: Record<string, string> = {
   content_or_trend_without_buying_intent: "内容或趋势，无购买意图",
   seller_self_promotion: "卖方自荐，不是买方",
   advice_or_listicle: "经验文或清单文，不是需求",
+  implicit_project_request: "合作或交付需求，需核实项目关系及预算",
 };
 
 export function reasonLabel(code: string | undefined): string {
@@ -52,6 +53,7 @@ export function gradeOf(record: EvidenceRecord): "A" | "B" | "C" {
 function matchesStatus(record: EvidenceRecord, filter: StatusFilter): boolean {
   const status = statusOf(record);
   if (filter === "all") return true;
+  if (record.category === "buyer" && record.assessment?.actionable_candidate === false && filter !== "invalidated") return false;
   if (filter === "pending") return status === "unverified" || status === "disputed";
   return status === filter;
 }
@@ -138,13 +140,13 @@ export function parseBudget(value: string): number | null | "invalid" {
 
 export function evidenceBudgetLabel(record: EvidenceRecord): string {
   try {
-    const facts = JSON.parse(String(record.metadata?.facts ?? "{}")) as {budget_min?:number|null;budget_max?:number|null;currency?:string|null};
+    const facts = JSON.parse(String(record.metadata?.facts ?? "{}")) as {budget_min?:number|null;budget_max?:number|null;budget_bound?:string;currency?:string|null};
     const manual = record.metadata?.budget_min !== undefined || record.metadata?.budget_max !== undefined;
     const low = manual ? parseBudget(String(record.metadata?.budget_min ?? "")) : facts.budget_min;
     const high = manual ? parseBudget(String(record.metadata?.budget_max ?? "")) : facts.budget_max;
     const values = [low,high].filter((value):value is number => typeof value === "number" && Number.isFinite(value) && value>=0);
     if (!values.length) return "预算未知";
-    const range = values.length===2 && values[0]!==values[1] ? `${values[0]}–${values[1]}` : String(values[0]);
+    const range = !manual && facts.budget_bound === "lower" ? `${values[0]}+` : values.length===2 && values[0]!==values[1] ? `${values[0]}–${values[1]}` : String(values[0]);
     return `${manual ? "人工记录预算" : "预算"} ${facts.currency || "币种未知"} ${range}`;
   } catch { return "预算未知"; }
 }

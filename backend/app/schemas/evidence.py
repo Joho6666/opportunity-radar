@@ -4,6 +4,12 @@ from ..services.evidence_ingest import EvidenceBatch, EvidenceCategory, Evidence
 from pydantic import BaseModel, Field
 from typing import Literal
 
+class AssessmentReview(BaseModel):
+    model_config = {"extra":"forbid"}
+    availability: Literal["open","closed","unknown"] | None = None
+    payment: Literal["explicit","unknown","no_budget","conflicting"] | None = None
+    eligibility: Literal["eligible","excluded","needs_review"] | None = None
+
 class EvidenceReview(BaseModel):
     model_config = {"extra": "forbid"}
     verification_status: Literal["unverified", "verified", "invalidated", "disputed"] | None = None
@@ -13,6 +19,8 @@ class EvidenceReview(BaseModel):
     budget_min: int | None = Field(default=None,ge=0)
     budget_max: int | None = Field(default=None,ge=0)
     notes: str | None = Field(default=None, max_length=2000)
+    assessment: AssessmentReview | None = None
+    label_group: str | None = Field(default=None,min_length=1,max_length=150)
 
 
 

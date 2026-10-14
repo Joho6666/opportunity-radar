@@ -34,6 +34,8 @@ def isolated_paid_and_queue_configuration(monkeypatch):
         monkeypatch.setattr(settings, field, "")
     monkeypatch.setattr(settings, "paid_api_enabled", False)
     monkeypatch.setattr(settings, "enable_ai_classification", False)
+    monkeypatch.setattr(settings, "local_classifier_mode", "shadow")
+    monkeypatch.setattr(settings, "local_classifier_path", "")
 
 @pytest.fixture(autouse=True)
 def explicit_mock_collector(monkeypatch):

@@ -19,7 +19,7 @@ def test_raw_items_keep_platform_and_acquisition_provenance():
     batch = raw_items_to_evidence_batch(source="tikhub", query="AI视频广告", items=[item], batch_id="tikhub-1")
     record = batch.items[0]
     assert record.category == "market"
-    assert record.classification_source == "rule_v2"
+    assert record.classification_source == "rule_v3"
     assert record.classification_reason
     assert record.source_platform == "tiktok"
     assert record.acquisition_tool == "tikhub"
@@ -38,7 +38,7 @@ def test_high_engagement_does_not_create_buyer_signal():
     )
     record = raw_items_to_evidence_batch(source="tikhub", query="AI视频广告", items=[item], batch_id="tikhub-2").items[0]
     assert record.category == "market"
-    assert record.classification_source == "rule_v2"
+    assert record.classification_source == "rule_v3"
 
 
 def test_rule_grade_survives_persistence():
