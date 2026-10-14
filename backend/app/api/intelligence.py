@@ -27,24 +27,44 @@ BILLABLE_SOURCES = TIKHUB_SOURCES | {"web_search"}
 class EvidenceCollectRequest(BaseModel):
     cursor: str | None = Field(default=None,max_length=100)
     manual_confirmed: bool = False
+    request_id: str | None = Field(default=None,min_length=8,max_length=100,pattern=r"^[A-Za-z0-9:_-]+$")
+    billing_batch_id: str | None = Field(default=None,max_length=100)
 
 
-def _source_status() -> dict[str, dict[str, bool]]:
+def _source_status() -> dict:
     settings = get_settings()
+    import json, math
+    from ..collectors.tikhub_cn import DOMESTIC_COLLECTORS
+    from ..collectors.tikhub import TikHubCollector
+    try:
+        prices = json.loads(settings.tikhub_endpoint_prices_json or "{}")
+    except ValueError:
+        prices = {}
+    prices = prices if isinstance(prices, dict) else {}
+    costs = {}
+    def positive_price(price):
+        return price if isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0 else None
+    for cls in (*DOMESTIC_COLLECTORS, TikHubCollector):
+        price = prices.get(cls.path) if settings.tikhub_endpoint_prices_json else settings.tikhub_price_per_request
+        costs[cls.slug] = positive_price(price)
     return {
         "github": {"configured": True},
         "hackernews": {"configured": True},
         "rss": {"configured": bool(settings.rss_feeds.strip())},
-        **{name: {"configured": bool(settings.tikhub_api_key)} for name in sorted(TIKHUB_SOURCES)},
-        "web_search": {"configured": bool(settings.firecrawl_api_key)},
+        **{name: {"configured": bool(settings.tikhub_api_key), "estimated_request_cost_usd": costs.get(name)} for name in sorted(TIKHUB_SOURCES)},
+        "web_search": {"configured": bool(settings.firecrawl_api_key), "estimated_request_cost_usd": positive_price(settings.firecrawl_price_per_request)},
     }
 
 
 @router.get("/evidence/runtime")
 async def evidence_runtime(user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     settings = get_settings()
+    from .billing import status
+    billing = await status(user=user, repo=repo)
     return {
         "paid_api_enabled": settings.paid_api_enabled,
+        "billing_batch_id": settings.paid_batch_id or None,
+        "billing_batch": billing["batch"],
         "storage_mode": "postgres" if hasattr(repo, "engine") else "memory",
         "warning": "当前使用内存存储，重启后数据不会保留。" if settings.use_in_memory_store else None,
         "sources": _source_status(),
@@ -60,6 +80,27 @@ async def collect_evidence(
     user: CurrentUser = Depends(get_current_user),
     repo: Repository = Depends(get_repository),
 ):
+    from ..services.collection_control import claim_request, finish_request
+    import hashlib, json
+    if payload.billing_batch_id and payload.billing_batch_id != get_settings().paid_batch_id:
+        raise AppError("PAID_BATCH_UNAUTHORIZED", "本轮批次标识不匹配。", 403)
+    if payload.request_id:
+        fingerprint = hashlib.sha256(json.dumps([source, query.strip(), payload.cursor, max_age_days, get_settings().paid_batch_id]).encode()).hexdigest()
+        cached = claim_request(repo, user.id, payload.request_id, fingerprint)
+        if cached is not None:
+            return cached
+    try:
+        result = await _collect_once(payload, source, query.strip(), max_age_days, user, repo)
+        if payload.request_id:
+            finish_request(repo, user.id, payload.request_id, result)
+        return result
+    except AppError as exc:
+        if payload.request_id:
+            finish_request(repo, user.id, payload.request_id, {"code": exc.code, "message": exc.message, "status_code": exc.status_code}, failed=True)
+        raise
+
+
+async def _collect_once(payload, source, query, max_age_days, user, repo):
     collection_id = str(uuid4())
     status = _source_status()[source]
     if source in BILLABLE_SOURCES and not payload.manual_confirmed:
@@ -69,14 +110,25 @@ async def collect_evidence(
 
     if source in BILLABLE_SOURCES and not get_settings().paid_api_enabled:
         raise AppError("PAID_API_DISABLED", "真实付费调用已关闭。", 403)
+    if source in BILLABLE_SOURCES and not payload.request_id:
+        raise AppError("REQUEST_ID_REQUIRED", "付费采集需要幂等请求标识，避免重复收费。", 400)
     from ..services.billing_gateway import paid_context
-    with paid_context(repo, user.id, "evidence", collection_id):
-        if payload.cursor is not None:
-            items, provider_error = await registry.search(source, query, cursor=payload.cursor, paged=True)
+    from ..services.collection_control import resolve_cursor, issue_cursor
+    domestic = source in {"xiaohongshu", "douyin", "weibo", "zhihu"}
+    cursor = resolve_cursor(repo, user.id, source, query, payload.cursor) if domestic and payload.cursor else payload.cursor
+    with paid_context(repo, user.id, "evidence", collection_id) as context:
+        if domestic or cursor is not None:
+            items, provider_error = await registry.search(source, query, cursor=cursor, paged=True)
         else:
             items, provider_error = await registry.search(source, query)
+        next_cursor = context.get("next_cursor") or (items[0].metadata.get("next_cursor") if items else None)
     if provider_error:
-        raise AppError(provider_error.get("error_code", "COLLECTOR_FAILED"), "数据源采集失败，请稍后重试。", 502)
+        code = provider_error.get("error_code", "COLLECTOR_FAILED")
+        message = ("付费授权、接口价格或剩余额度不足，请检查费用配置。" if code.startswith(("PAID_", "BILLING_"))
+                   else "数据源采集失败，请检查来源状态或保存的响应。")
+        raise AppError(code, message, provider_error.get("status_code", 502))
+    if domestic:
+        next_cursor = issue_cursor(repo, user.id, source, query, next_cursor)
 
     accepted = []
     rejected = 0
@@ -88,18 +140,21 @@ async def collect_evidence(
             rejected += 1
             continue
         # An old post is rarely still an open request (search often returns years-old threads).
-        if item.published_at and (item.published_at if item.published_at.tzinfo else item.published_at.replace(tzinfo=UTC)) < cutoff:
+        dates = [value if value.tzinfo else value.replace(tzinfo=UTC) for value in (item.published_at, item.updated_at_source) if value]
+        if dates and max(dates) < cutoff:
             stale += 1
             continue
         # Keep collector fields available to the evidence inbox without changing
         # the canonical raw text used for classification.
         metadata = dict(item.metadata or {})
+        metadata.pop("next_cursor", None)
+        metadata["freshness"] = "known" if dates else "unknown"
         metadata.update({"raw_title": item.title, "raw_author": item.author or "", "raw_source": item.source})
         accepted.append(item.model_copy(update={"metadata": metadata}))
 
     if not accepted:
         repo.record_collection(user.id,collection_id,source,len(items),0,stale=stale)
-        return {"batch_id": None, "fetched": len(items), "inserted": 0, "duplicates": 0, "rejected": rejected, "stale": stale, "records": [], "warning": "内存存储" if get_settings().use_in_memory_store else None}
+        return {"batch_id": collection_id, "next_cursor": next_cursor, "billing_batch_id": get_settings().paid_batch_id or None, "request_id": payload.request_id, "fetched": len(items), "inserted": 0, "duplicates": 0, "rejected": rejected, "stale": stale, "records": [], "warning": "内存存储" if get_settings().use_in_memory_store else None}
 
     batch = raw_items_to_evidence_batch(
         source="tiktok" if source == "tikhub" else source,
@@ -115,7 +170,9 @@ async def collect_evidence(
     repo.record_collection(user.id,collection_id,source,len(items),result.inserted,result.duplicates,stale)
     return {
         "batch_id": result.batch_id,
-        "next_cursor": items[0].metadata.get("next_cursor") if items else None,
+        "next_cursor": next_cursor,
+        "billing_batch_id": get_settings().paid_batch_id or None,
+        "request_id": payload.request_id,
         "fetched": len(items),
         "inserted": result.inserted,
         "duplicates": result.duplicates,

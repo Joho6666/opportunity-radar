@@ -16,7 +16,7 @@ def _setup(monkeypatch, search_result=None, *, tikhub_key="", firecrawl_key=""):
     if search_result is None:
         search_result = [RawItem(external_id="1", title="title", content="A sufficiently long evidence text.", url="https://example.test/1", source="github", platform="github", metadata={"keep": "yes"})]
 
-    async def fake_search(source, query):
+    async def fake_search(source, query, **kwargs):
         fake_search.calls.append((source, query))
         return search_result, None
 
@@ -42,6 +42,20 @@ def test_runtime_reports_storage_and_source_configuration(monkeypatch):
     assert payload["sources"]["tikhub"]["configured"] is False
     assert payload["sources"]["web_search"]["configured"] is False
     assert "api_key" not in str(payload).lower()
+
+
+def test_runtime_prices_cover_existing_tiktok_and_web_search(monkeypatch):
+    from app.api.intelligence import _source_status
+    from app.collectors.tikhub import TikHubCollector
+    settings = get_settings()
+    monkeypatch.setattr(settings, "tikhub_price_per_request", .03)
+    monkeypatch.setattr(settings, "firecrawl_price_per_request", .02)
+    assert _source_status()["tikhub"]["estimated_request_cost_usd"] == .03
+    assert _source_status()["web_search"]["estimated_request_cost_usd"] == .02
+    monkeypatch.setattr(settings, "tikhub_endpoint_prices_json", '{}')
+    assert _source_status()["tikhub"]["estimated_request_cost_usd"] is None
+    monkeypatch.setattr(settings, "tikhub_endpoint_prices_json", '{"' + TikHubCollector.path + '":0.01}')
+    assert _source_status()["tikhub"]["estimated_request_cost_usd"] == .01
 
 
 def test_collect_converts_items_persists_and_rejects_short_text(monkeypatch):
@@ -112,10 +126,14 @@ def test_collect_drops_stale_posts_and_requires_confirmation_for_domestic_source
     ]
     repository, fake_search = _setup(monkeypatch, items, tikhub_key="k")
     monkeypatch.setattr(get_settings(),"paid_api_enabled",True)  # mock search only; no transport
+    # This unit isolates freshness; PostgreSQL identity is covered by the real
+    # production-contract tests, not the in-memory repository.
+    monkeypatch.setattr("app.services.collection_control.claim_request", lambda *args: None)
+    monkeypatch.setattr("app.services.collection_control.finish_request", lambda *args, **kwargs: None)
     client = TestClient(app)
     try:
         refused = client.post("/api/intelligence/evidence/collect?source=douyin&query=剪辑", json={"manual_confirmed": False})
-        response = client.post("/api/intelligence/evidence/collect?source=douyin&query=剪辑", json={"manual_confirmed": True})
+        response = client.post("/api/intelligence/evidence/collect?source=douyin&query=剪辑", json={"manual_confirmed": True, "request_id":"offline-freshness"})
     finally:
         app.dependency_overrides.clear()
     assert refused.status_code == 400 and refused.json()["error"]["code"] == "MANUAL_CONFIRMATION_REQUIRED"

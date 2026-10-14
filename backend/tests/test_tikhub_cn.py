@@ -83,7 +83,7 @@ def test_douyin_collector_posts_to_configured_base_url(monkeypatch):
     monkeypatch.setattr(tikhub_cn, "get_settings", lambda: Settings(tikhub_api_key="k", tikhub_base_url="https://api.tikhub.dev/"))
     monkeypatch.setattr(tikhub_cn.fetcher, "post_json", fake_post_json)
     assert asyncio.run(DouyinCollector().search(" 剪辑 ")) == []
-    assert calls == [("https://api.tikhub.dev/api/v1/douyin/search/fetch_general_search_v1", {"keyword": "剪辑", "cursor": 0, "sort_type": "0", "publish_time": "7"}, "Bearer k")]
+    assert calls == [("https://api.tikhub.dev/api/v1/douyin/search/fetch_general_search_v1", {"keyword": "剪辑", "cursor": 0, "sort_type": "2", "publish_time": "7", "search_id": "", "backtrace": ""}, "Bearer k")]
 
 
 def test_collector_refuses_without_key(monkeypatch):
@@ -173,3 +173,38 @@ def test_domestic_cursor_is_explicit_and_bounded(monkeypatch,cls,key,cursor):
 @pytest.mark.parametrize("raw",["今天 99:99","2026年2月30日","昨天 25:00"])
 def test_invalid_weibo_dates_are_unknown(raw):
     assert parse_weibo_time(raw,NOW) is None
+
+
+@pytest.mark.parametrize("cls,first,expected", [
+    (tikhub_cn.XiaohongshuCollector, {"data": {"items": [], "has_more": True, "search_id": "s1", "search_session_id": "session1"}}, {"page": "2", "search_id": "s1", "search_session_id": "session1"}),
+    (tikhub_cn.DouyinCollector, {"data": [], "has_more": True, "cursor": 20, "search_id": "s2", "backtrace": "b2"}, {"cursor": 20, "search_id": "s2", "backtrace": "b2"}),
+])
+def test_empty_page_keeps_provider_sessions(cls, first, expected, monkeypatch):
+    from urllib.parse import urlparse, parse_qs
+    calls = []
+    async def get(url, **kwargs):
+        args = {k:v[0] for k,v in parse_qs(urlparse(url).query).items()}
+        calls.append(args)
+        return {"code": 200, "data": first if len(calls) == 1 else {"data": {"items": []}}}
+    async def post(url, args, **kwargs):
+        calls.append(args)
+        return {"code": 200, "data": first if len(calls) == 1 else {"data": []}}
+    monkeypatch.setattr(tikhub_cn, "get_settings", lambda: Settings(tikhub_api_key="offline-only"))
+    monkeypatch.setattr(tikhub_cn.fetcher, "get_json", get)
+    monkeypatch.setattr(tikhub_cn.fetcher, "post_json", post)
+    async def run():
+        adapter = cls()
+        items, cursor = await adapter.search_page("找人")
+        assert items == [] and cursor
+        await adapter.search_page("找人", cursor)
+    asyncio.run(run())
+    for key, value in expected.items():
+        assert calls[1][key] == value
+
+
+def test_incomplete_search_session_does_not_offer_charged_next_page(monkeypatch):
+    async def get(url, **kwargs):
+        return {"code":200,"data":{"data":{"items":[],"has_more":True}}}
+    monkeypatch.setattr(tikhub_cn,"get_settings",lambda:Settings(tikhub_api_key="offline-only"))
+    monkeypatch.setattr(tikhub_cn.fetcher,"get_json",get)
+    assert asyncio.run(tikhub_cn.XiaohongshuCollector().search_page("PPT")) == ([],None)

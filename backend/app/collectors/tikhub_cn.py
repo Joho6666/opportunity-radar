@@ -7,6 +7,7 @@ responses without network or cost.
 from __future__ import annotations
 
 import re
+import json
 from datetime import UTC, datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -197,9 +198,7 @@ class _TikHubCnCollector(SourceAdapter):
         raise NotImplementedError
 
     async def search(self, query: str) -> list[RawItem]:
-        items, next_cursor = await self.search_page(query)
-        for item in items:
-            item.metadata["next_cursor"] = next_cursor
+        items, _ = await self.search_page(query)
         return items
 
     async def search_page(self, query: str, cursor: str | None = None) -> tuple[list[RawItem], str | None]:
@@ -213,11 +212,15 @@ class _TikHubCnCollector(SourceAdapter):
         headers = {"Authorization": f"Bearer {settings.tikhub_api_key}", "Accept": "application/json"}
         args = self.request_args(query)
         if cursor is not None:
-            position = int(cursor)
+            state = json.loads(cursor) if cursor.startswith("{") else {}
+            position = int(state.get("position", cursor) if state else cursor)
             if not 0 <= position <= 10000:
                 raise ValueError("Invalid cursor")
             key = "page" if self.slug in {"xiaohongshu", "weibo"} else "offset" if self.slug == "zhihu" else "cursor"
             args[key] = str(position) if self.slug == "zhihu" else position
+            for key in ("search_id", "search_session_id", "backtrace", "search_hash_id"):
+                if key in state:
+                    args[key] = state[key]
         if self.method == "POST":
             payload = await fetcher.post_json(url, args, headers=headers, timeout=90, billable_provider="tikhub", billable_source=self.slug)
         else:
@@ -227,11 +230,27 @@ class _TikHubCnCollector(SourceAdapter):
         if not isinstance(payload.get("data"), dict):
             raise RuntimeError("PROVIDER_SCHEMA_CHANGED")
         data = payload["data"]
+        if self.slug == "xiaohongshu" and isinstance(data.get("data"), dict):
+            data = data["data"]
         next_cursor = data.get("next_cursor")
         if next_cursor is None and data.get("has_more") and self.slug in {"xiaohongshu","weibo"}:
             next_cursor = str(int(args["page"]) + 1)
         if next_cursor is None and data.get("has_more") and data.get("cursor") is not None:
             next_cursor = str(data["cursor"])
+        if self.slug == "zhihu" and isinstance(data.get("paging"), dict) and not data["paging"].get("is_end", True):
+            from urllib.parse import urlparse, parse_qs
+            next_cursor = parse_qs(urlparse(data["paging"].get("next", "")).query).get("offset", [None])[0]
+        if next_cursor is not None and self.slug in {"xiaohongshu", "douyin"}:
+            state = {"position": int(next_cursor)}
+            for key in ("search_id", "search_session_id", "backtrace"):
+                if data.get(key) is not None:
+                    state[key] = data[key]
+            if isinstance(data.get("log_pb"), dict) and "search_id" not in state:
+                state["search_id"] = data["log_pb"].get("impr_id", "")
+            required = ("search_id","search_session_id") if self.slug == "xiaohongshu" else ("search_id","backtrace")
+            # A guessed continuation could repeat the first page and incur another
+            # charge. Keep first-page evidence, but do not offer incomplete sessions.
+            next_cursor = json.dumps(state, separators=(",", ":")) if all(state.get(key) for key in required) else None
         return self.parse(payload, query), str(next_cursor) if next_cursor is not None else None
 
 
@@ -240,7 +259,7 @@ class XiaohongshuCollector(_TikHubCnCollector):
     path = "/api/v1/xiaohongshu/app_v2/search_notes"
 
     def request_args(self, query: str) -> dict:
-        return {"keyword": query, "page": 1, "sort_type": "time_descending"}
+        return {"keyword": query, "page": 1, "sort_type": "time_descending", "time_filter": "一周内", "ai_mode": 0}
 
     def parse(self, payload: dict, query: str) -> list[RawItem]:
         return parse_xiaohongshu(payload, query)
@@ -262,7 +281,7 @@ class ZhihuCollector(_TikHubCnCollector):
     path = "/api/v1/zhihu/web/fetch_article_search_v3"
 
     def request_args(self, query: str) -> dict:
-        return {"keyword": query, "offset": "0", "limit": "20"}
+        return {"keyword": query, "offset": "0", "limit": "20", "search_source": "Filter", "sort": "created_time", "time_interval": "a_month"}
 
     def parse(self, payload: dict, query: str) -> list[RawItem]:
         return parse_zhihu(payload, query)
@@ -275,7 +294,7 @@ class DouyinCollector(_TikHubCnCollector):
 
     def request_args(self, query: str) -> dict:
         # publish_time "7": last week only; older posts are rarely still open requests.
-        return {"keyword": query, "cursor": 0, "sort_type": "0", "publish_time": "7"}
+        return {"keyword": query, "cursor": 0, "sort_type": "2", "publish_time": "7", "search_id": "", "backtrace": ""}
 
     def parse(self, payload: dict, query: str) -> list[RawItem]:
         return parse_douyin(payload, query)

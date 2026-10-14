@@ -55,7 +55,9 @@ class CollectorRegistry:
         try:
             if paged:
                 items, next_cursor = await adapter.search_page(query,cursor)
-                for item in items: item.metadata["next_cursor"] = next_cursor
+                from ..services.billing_gateway import _context
+                if _context.get() is not None:
+                    _context.get()["next_cursor"] = next_cursor
             else:
                 items = await adapter.search(query)
             self._failures[slug] = 0
@@ -68,7 +70,7 @@ class CollectorRegistry:
             error_code = getattr(exc, "code", None) or ("RATE_LIMITED" if "429" in str(exc) else "COLLECTOR_FAILED")
             message = f"{slug}: {error_code}"
             self._record_health(slug, ok=False, items=0, latency_ms=int((time.perf_counter() - started) * 1000), error_code=error_code, error_message=message)
-            return [], {"source": slug, "error_code": error_code, "message": message}
+            return [], {"source": slug, "error_code": error_code, "message": message, "status_code": getattr(exc, "status_code", 502)}
 
     def _record_health(self, slug: str, ok: bool, items: int, latency_ms: int, error_code: str | None = None, error_message: str | None = None) -> None:
         if self._health_recorder is None:

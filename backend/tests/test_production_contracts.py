@@ -50,9 +50,41 @@ def test_rls_denies_other_tenants_and_billing_writes(pg_repo):
             with pytest.raises(Exception,match="row-level security"):
                 with conn.begin_nested():
                     conn.execute(text("INSERT INTO billing_authorizations(user_id,scope,enabled,run_requests,daily_requests,run_micros,daily_micros) VALUES(CAST(:uid AS uuid),'evidence',true,1,1,1,1)"),{"uid":uid})
-            for table in ("billing_calls","billing_authorizations","evidence_reviews","collection_receipts","schema_migrations"):
+            for table in ("billing_calls","billing_authorizations","evidence_reviews","collection_receipts","schema_migrations","billing_batches","provider_responses","collection_requests","collector_cursors"):
                 assert conn.execute(text(f'SELECT count(*) FROM {table}')).scalar() == 0
         finally:tx.rollback()
+
+
+def test_debug_receipt_rls_reads_only_owner_and_never_writes(pg_repo):
+    from app.services.collection_control import claim_request, issue_cursor
+    uid, other = str(uuid4()), str(uuid4())
+    for user in (uid, other):
+        pg_repo.get_profile(user)
+        claim_request(pg_repo, user, "receipt-test", "fixture")
+        issue_cursor(pg_repo, user, "xiaohongshu", "PPT", '{"position":2}')
+    role = "contract_" + uuid4().hex
+    with pg_repo.engine.connect() as conn:
+        tx = conn.begin()
+        try:
+            for user in (uid, other):
+                call = str(uuid4())
+                conn.execute(text("INSERT INTO billing_batches(id,user_id,providers,sources,request_limit,cost_limit_micros,request_limit_micros) VALUES(CAST(:uid AS text),CAST(:uid AS uuid),'[]','[]',1,1,1)"), {"uid":user})
+                conn.execute(text("INSERT INTO billing_calls(id,user_id,scope,run_id,provider,source,scheduled,reserved_micros) VALUES(CAST(:call AS uuid),CAST(:uid AS uuid),'evidence',CAST(:call AS text),'tikhub','xiaohongshu',false,1)"), {"call":call,"uid":user})
+                conn.execute(text("INSERT INTO provider_responses(call_id,user_id,endpoint,status_code,payload) VALUES(CAST(:call AS uuid),CAST(:uid AS uuid),'/search',200,'{}')"), {"call":call,"uid":user})
+            conn.exec_driver_sql(f'CREATE ROLE "{role}" NOLOGIN')
+            conn.exec_driver_sql(f'GRANT USAGE ON SCHEMA public,auth TO "{role}"')
+            conn.exec_driver_sql(f'GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA public TO "{role}"')
+            conn.exec_driver_sql(f'SET LOCAL ROLE "{role}"')
+            conn.execute(text("SELECT set_config('request.jwt.claim.sub',:uid,true)"), {"uid":uid})
+            for table in ("billing_batches", "provider_responses", "collection_requests"):
+                assert [str(value) for value in conn.execute(text(f"SELECT user_id FROM {table}")).scalars()] == [uid]
+                assert conn.execute(text(f"UPDATE {table} SET user_id=user_id RETURNING user_id")).first() is None
+            assert conn.execute(text("SELECT count(*) FROM collector_cursors")).scalar_one() == 0
+            with pytest.raises(Exception, match="row-level security"):
+                with conn.begin_nested():
+                    conn.execute(text("INSERT INTO collection_requests(id,user_id,fingerprint,status,result) VALUES('forged',CAST(:uid AS uuid),'bad','succeeded','{}')"), {"uid":uid})
+        finally:
+            tx.rollback()
 
 def test_review_sync_and_duplicate_pipeline_update(pg_repo):
     uid=str(uuid4());evidence,item=build(pg_repo,uid)
@@ -74,6 +106,163 @@ def test_metrics_unknown_values_and_collection_identity():
     assert metrics["collected"] == 7 and metrics["effective_evidence"] == 1
     assert metrics["verified_buyer"] == 1 and metrics["contacted"] == metrics["won"] == 0
     assert metrics["actual_revenue"] is None
+    assert metrics["source_yield"]["rss"]["collected"] == 7
+
+
+def test_collect_same_request_returns_receipt_without_second_acquisition(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    from app.schemas.domain import RawItem
+    uid, request_id = str(uuid4()), str(uuid4())
+    pg_repo.get_profile(uid)
+    calls = []
+    async def search(source, query, **kwargs):
+        calls.append(query)
+        return [RawItem(external_id=request_id, title="需求", content="找人做PPT，预算1200元，本周交付", url="https://example.test/"+request_id, source="github", platform="github")], None
+    monkeypatch.setattr(registry, "search", search)
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: pg_repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    with TestClient(app) as client:
+        first = client.post("/api/intelligence/evidence/collect?source=github&query=PPT", json={"request_id": request_id})
+        again = client.post("/api/intelligence/evidence/collect?source=github&query=PPT", json={"request_id": request_id})
+        conflict = client.post("/api/intelligence/evidence/collect?source=github&query=Word", json={"request_id": request_id})
+    assert first.status_code == again.status_code == 200
+    assert first.json() == again.json()
+    assert calls == ["PPT"]
+    assert conflict.status_code == 409
+    assert pg_repo.collection_counts(uid)["collected"] == 1
+
+
+def test_simultaneous_request_claims_have_one_owner(pg_repo):
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services.collection_control import claim_request
+    uid, request_id = str(uuid4()), str(uuid4())
+    pg_repo.get_profile(uid)
+    def claim(_):
+        try:
+            assert claim_request(pg_repo, uid, request_id, "same-fingerprint") is None
+            return "owner"
+        except AppError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(claim, range(8)))
+    assert results.count("owner") == 1
+    assert results.count("COLLECTION_IN_PROGRESS") == 7
+
+
+def test_paid_collection_requires_request_identity(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    uid = str(uuid4())
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: pg_repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    monkeypatch.setattr(get_settings(), "paid_api_enabled", True)
+    monkeypatch.setattr(get_settings(), "tikhub_api_key", "offline-only")
+    async def never(*args, **kwargs):
+        pytest.fail("No acquisition without request identity")
+    monkeypatch.setattr(registry, "search", never)
+    with TestClient(app) as client:
+        response = client.post("/api/intelligence/evidence/collect?source=douyin&query=PPT", json={"manual_confirmed":True})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "REQUEST_ID_REQUIRED"
+
+
+def test_recent_source_update_survives_freshness_filter(pg_repo, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    from app.schemas.domain import RawItem
+    uid = str(uuid4()); now = datetime.now(UTC)
+    async def search(source, query, **kwargs):
+        return [RawItem(external_id=uid, title="需求更新", content="需要修改企业官网，预算3000元", url="https://example.test/"+uid, source="github", platform="github", published_at=now-timedelta(days=400), updated_at_source=now-timedelta(days=1), metadata={"next_cursor": "20"})], None
+    monkeypatch.setattr(registry, "search", search)
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: pg_repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    with TestClient(app) as client:
+        result = client.post("/api/intelligence/evidence/collect?source=github&query=官网", json={})
+    assert result.status_code == 200
+    assert result.json()["inserted"] == 1 and result.json()["stale"] == 0
+
+
+@pytest.mark.parametrize("all_stale", [False, True])
+def test_empty_domestic_page_has_tenant_bound_continuation(pg_repo, monkeypatch, all_stale):
+    from datetime import UTC, datetime, timedelta
+    from app.schemas.domain import RawItem
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    from app.collectors.tikhub_cn import XiaohongshuCollector
+    from app.services.collection_control import resolve_cursor
+    uid = str(uuid4()); pg_repo.get_profile(uid)
+    monkeypatch.setattr(get_settings(), "paid_api_enabled", True)
+    monkeypatch.setattr(get_settings(), "tikhub_api_key", "offline-only")
+    async def page(self, query, cursor=None):
+        items = [RawItem(external_id="stale", title="历史需求", content="2019年的旧需求，找人做PPT", url="https://example.test/stale", source="xiaohongshu", published_at=datetime.now(UTC)-timedelta(days=400))] if all_stale else []
+        return items, '{"position":2,"search_id":"private-session","search_session_id":"session"}'
+    monkeypatch.setattr(XiaohongshuCollector, "search_page", page)
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: pg_repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    with TestClient(app) as client:
+        result = client.post("/api/intelligence/evidence/collect?source=xiaohongshu&query=PPT", json={"manual_confirmed": True, "request_id":str(uuid4())})
+    assert result.status_code == 200
+    body = result.json()
+    assert body["fetched"] == int(all_stale) and body["stale"] == int(all_stale)
+    assert body["inserted"] == 0 and body["next_cursor"]
+    assert "private-session" not in str(body)
+    assert 'private-session' in resolve_cursor(pg_repo, uid, "xiaohongshu", "PPT", body["next_cursor"])
+    with pytest.raises(AppError): resolve_cursor(pg_repo, str(uuid4()), "xiaohongshu", "PPT", body["next_cursor"])
+    with pytest.raises(AppError): resolve_cursor(pg_repo, uid, "xiaohongshu", "Word", body["next_cursor"])
+
+
+def test_collection_failure_is_replayed_without_network(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    uid = str(uuid4()); pg_repo.get_profile(uid); calls = []
+    async def fail(*args, **kwargs):
+        calls.append(1)
+        return [], {"error_code": "PROVIDER_SCHEMA_CHANGED"}
+    monkeypatch.setattr(registry, "search", fail)
+    monkeypatch.setitem(app.dependency_overrides, get_repository, lambda: pg_repo)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: CurrentUser(id=uid))
+    with TestClient(app) as client:
+        for _ in range(2):
+            result = client.post("/api/intelligence/evidence/collect?source=github&query=PPT", json={"request_id": str(uid)})
+            assert result.status_code == 502
+    assert calls == [1]
+
+
+def test_billing_refusal_keeps_its_http_status(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    from app.collectors.base import SourceAdapter
+    class Denied(SourceAdapter):
+        slug = "github"
+        async def search(self, query):
+            raise AppError("PAID_QUOTA_EXHAUSTED", "quota reached", 429)
+    uid=str(uuid4())
+    monkeypatch.setitem(registry._adapters,"github",Denied())
+    monkeypatch.setitem(app.dependency_overrides,get_repository,lambda:pg_repo)
+    monkeypatch.setitem(app.dependency_overrides,get_current_user,lambda:CurrentUser(id=uid))
+    with TestClient(app) as client:
+        result=client.post("/api/intelligence/evidence/collect?source=github&query=PPT",json={})
+    assert result.status_code == 429
 
 @pytest.mark.parametrize("url",["http://[::ffff:127.0.0.1]","http://169.254.169.254/latest","https://user:pass@example.com","file:///etc/passwd"])
 def test_ssrf_unsafe_urls(url):
