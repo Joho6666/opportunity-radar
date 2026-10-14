@@ -50,11 +50,14 @@ def test_runtime_prices_cover_existing_tiktok_and_web_search(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "tikhub_price_per_request", .03)
     monkeypatch.setattr(settings, "firecrawl_price_per_request", .02)
-    assert _source_status()["tikhub"]["estimated_request_cost_usd"] == .03
+    assert _source_status()["tikhub"]["estimated_request_cost_usd"] is None
     assert _source_status()["web_search"]["estimated_request_cost_usd"] == .02
     monkeypatch.setattr(settings, "tikhub_endpoint_prices_json", '{}')
     assert _source_status()["tikhub"]["estimated_request_cost_usd"] is None
     monkeypatch.setattr(settings, "tikhub_endpoint_prices_json", '{"' + TikHubCollector.path + '":0.01}')
+    from test_price_evidence import receipt
+    import json
+    monkeypatch.setattr(settings,"tikhub_price_receipts_json",json.dumps({TikHubCollector.path:receipt()}))
     assert _source_status()["tikhub"]["estimated_request_cost_usd"] == .01
 
 

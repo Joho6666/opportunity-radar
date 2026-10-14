@@ -70,7 +70,7 @@ def _author(entry) -> str | None:
 
 
 def _published(entry) -> datetime | None:
-    value = entry.get("published") or entry.get("updated")
+    value = entry.get("published")
     if not value:
         return None
     try:

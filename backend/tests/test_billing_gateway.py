@@ -22,6 +22,12 @@ def billing(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "paid_api_enabled", True)
     monkeypatch.setattr(settings, "tikhub_price_per_request", .05)
+    from test_price_evidence import receipt
+    from app.services.price_evidence import tikhub_endpoint
+    import json
+    endpoints=[tikhub_endpoint("douyin"),tikhub_endpoint("weibo"),"/","/search"]
+    monkeypatch.setattr(settings,"tikhub_endpoint_prices_json",json.dumps({path:.05 for path in endpoints}))
+    monkeypatch.setattr(settings,"tikhub_price_receipts_json",json.dumps({path:receipt(.05) for path in endpoints}))
     monkeypatch.setattr(settings, "llm_price_input_per_mtok", 1)
     monkeypatch.setattr(settings, "llm_price_output_per_mtok", 2)
     return repo, uid
@@ -168,6 +174,12 @@ def test_batch_source_and_single_request_cost_are_enforced(batch_billing, monkey
             reserve("tikhub", "weibo")
         assert err.value.code == "PAID_BATCH_UNAUTHORIZED"
         monkeypatch.setattr(get_settings(), "tikhub_price_per_request", .11)
+        from app.services.price_evidence import tikhub_endpoint
+        from test_price_evidence import receipt
+        import json
+        path=tikhub_endpoint("douyin")
+        monkeypatch.setattr(get_settings(),"tikhub_endpoint_prices_json",json.dumps({path:.11}))
+        monkeypatch.setattr(get_settings(),"tikhub_price_receipts_json",json.dumps({path:receipt(.11)}))
         with pytest.raises(AppError) as err:
             reserve("tikhub", "douyin")
         assert err.value.code == "PAID_BATCH_EXHAUSTED"
@@ -217,6 +229,9 @@ def test_settings_repr_does_not_disclose_credentials():
 def test_unknown_endpoint_cannot_fall_back_to_flat_price(billing, monkeypatch):
     repo, uid = billing
     monkeypatch.setattr(get_settings(),"tikhub_endpoint_prices_json",'{"/search":0.02}')
+    from test_price_evidence import receipt
+    import json
+    monkeypatch.setattr(get_settings(),"tikhub_price_receipts_json",json.dumps({"/search":receipt(.02)}))
     with paid_context(repo,uid,"evidence",str(uuid4())):
         with pytest.raises(AppError) as err:
             reserve("tikhub","douyin",endpoint="/unknown")

@@ -33,25 +33,22 @@ class EvidenceCollectRequest(BaseModel):
 
 def _source_status() -> dict:
     settings = get_settings()
-    import json, math
+    import math
     from ..collectors.tikhub_cn import DOMESTIC_COLLECTORS
     from ..collectors.tikhub import TikHubCollector
-    try:
-        prices = json.loads(settings.tikhub_endpoint_prices_json or "{}")
-    except ValueError:
-        prices = {}
-    prices = prices if isinstance(prices, dict) else {}
     costs = {}
     def positive_price(price):
         return price if isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0 else None
     for cls in (*DOMESTIC_COLLECTORS, TikHubCollector):
-        price = prices.get(cls.path) if settings.tikhub_endpoint_prices_json else settings.tikhub_price_per_request
-        costs[cls.slug] = positive_price(price)
+        from ..services.price_evidence import verified_tikhub_price
+        verified = verified_tikhub_price(cls.path)
+        costs[cls.slug] = verified[0] if verified else None
     return {
         "github": {"configured": True},
         "hackernews": {"configured": True},
         "rss": {"configured": bool(settings.rss_feeds.strip())},
-        **{name: {"configured": bool(settings.tikhub_api_key), "estimated_request_cost_usd": costs.get(name)} for name in sorted(TIKHUB_SOURCES)},
+        **{name: {"configured": bool(settings.tikhub_api_key), "estimated_request_cost_usd": costs.get(name),
+                  "validation_status": "contract_only", "live_verified": False} for name in sorted(TIKHUB_SOURCES)},
         "web_search": {"configured": bool(settings.firecrawl_api_key), "estimated_request_cost_usd": positive_price(settings.firecrawl_price_per_request)},
     }
 
@@ -67,8 +64,32 @@ async def evidence_runtime(user: CurrentUser = Depends(get_current_user), repo: 
         "billing_batch": billing["batch"],
         "storage_mode": "postgres" if hasattr(repo, "engine") else "memory",
         "warning": "当前使用内存存储，重启后数据不会保留。" if settings.use_in_memory_store else None,
-        "sources": _source_status(),
+        "sources": _runtime_sources(repo, user.id),
     }
+
+
+def _runtime_sources(repo, user_id):
+    """Live status reflects this tenant's archived response compatibility only."""
+    sources = _source_status()
+    from ..collectors.tikhub_cn import DOMESTIC_COLLECTORS
+    from ..services.price_evidence import verified_tikhub_price
+    for cls in DOMESTIC_COLLECTORS:
+        entry=sources[cls.slug]
+        verified=verified_tikhub_price(cls.path)
+        entry["pricing_evidence"]=verified[1] if verified else None
+        if not hasattr(repo,"engine"):
+            continue
+        from sqlalchemy import text
+        from ..repositories.postgres import as_uuid
+        with repo.engine.connect() as conn:
+            row=conn.execute(text("SELECT r.payload,r.query,r.captured_at FROM provider_responses r JOIN billing_calls c ON c.id=r.call_id WHERE r.user_id=CAST(:uid AS uuid) AND r.endpoint=:path AND r.status_code=200 AND c.status='succeeded' ORDER BY r.captured_at DESC LIMIT 1"),{"uid":as_uuid(user_id),"path":cls.path}).mappings().first()
+        if row:
+            try:
+                cls().parse(row["payload"],row["query"] or "")
+                entry.update(validation_status="response_compatible",live_verified=True,live_checked_at=row["captured_at"].isoformat())
+            except Exception:
+                entry.update(validation_status="response_incompatible",live_verified=False)
+    return sources
 
 
 @router.post("/evidence/collect")

@@ -30,7 +30,7 @@ def isolated_paid_and_queue_configuration(monkeypatch):
     # real debugging batch. Network remains blocked by offline_http as well.
     from app.core.config import get_settings
     settings = get_settings()
-    for field in ("paid_batch_id", "tikhub_endpoint_prices_json", "tikhub_api_key", "firecrawl_api_key", "llm_api_key", "github_token", "redis_url"):
+    for field in ("paid_batch_id", "tikhub_endpoint_prices_json", "tikhub_price_receipts_json", "tikhub_api_key", "firecrawl_api_key", "llm_api_key", "github_token", "redis_url"):
         monkeypatch.setattr(settings, field, "")
     monkeypatch.setattr(settings, "paid_api_enabled", False)
     monkeypatch.setattr(settings, "enable_ai_classification", False)

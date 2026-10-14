@@ -37,11 +37,12 @@ def reserve(provider: str, source: str, estimated_tokens: int = 0, *, endpoint: 
     prices = {"tikhub": settings.tikhub_price_per_request, "firecrawl": settings.firecrawl_price_per_request,
               "llm": settings.llm_price_input_per_mtok, "embedding": settings.embedding_price_per_mtok}
     price = prices.get(provider, 0)
-    if provider == "tikhub" and settings.tikhub_endpoint_prices_json:
-        try:
-            price = json.loads(settings.tikhub_endpoint_prices_json).get(endpoint, 0)
-        except (ValueError, AttributeError):
-            price = 0
+    receipt = None
+    if provider == "tikhub":
+        from .price_evidence import verified_tikhub_price, tikhub_endpoint
+        endpoint = endpoint or tikhub_endpoint(source)
+        verified = verified_tikhub_price(endpoint)
+        price, receipt = verified if verified else (0, None)
     if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price):
         price = 0
     if price <= 0 or (provider == "llm" and settings.llm_price_output_per_mtok <= 0):
@@ -79,8 +80,8 @@ def reserve(provider: str, source: str, estimated_tokens: int = 0, *, endpoint: 
             or (settings.llm_daily_token_budget > 0 and totals["tokens"] + estimated_tokens > settings.llm_daily_token_budget)):
             raise AppError("PAID_QUOTA_EXHAUSTED", "付费请求、token 或费用额度不足。", 429)
         call_id = str(uuid4())
-        conn.execute(text("INSERT INTO billing_calls (id,user_id,scope,run_id,provider,source,reserved_micros,estimated_tokens,scheduled,batch_id,endpoint) VALUES (CAST(:id AS uuid),CAST(:uid AS uuid),:scope,:run,:provider,:source,:cost,:tokens,:scheduled,:batch,:endpoint)"),
-                     {**params, "id": call_id, "provider": provider, "source": source, "cost": cost, "tokens": estimated_tokens, "scheduled": context["scheduled"], "batch": batch_id, "endpoint": endpoint})
+        conn.execute(text("INSERT INTO billing_calls (id,user_id,scope,run_id,provider,source,reserved_micros,estimated_tokens,scheduled,batch_id,endpoint,price_receipt) VALUES (CAST(:id AS uuid),CAST(:uid AS uuid),:scope,:run,:provider,:source,:cost,:tokens,:scheduled,:batch,:endpoint,CAST(:receipt AS jsonb))"),
+                     {**params, "id": call_id, "provider": provider, "source": source, "cost": cost, "tokens": estimated_tokens, "scheduled": context["scheduled"], "batch": batch_id, "endpoint": endpoint,"receipt":json.dumps(receipt)})
     return repo, call_id
 
 

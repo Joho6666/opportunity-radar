@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     paid_daily_request_limit: int = Field(default=20,ge=1,le=100000)
     paid_batch_id: str = ""  # Server-selected cumulative authorization; never reset per run/day.
     tikhub_endpoint_prices_json: str = ""  # Verified USD/request by endpoint; missing endpoints fail closed.
+    tikhub_price_receipts_json: str = ""  # Admin-verified exact endpoint quotes; no generic-price fallback.
     tikhub_price_per_request: float = 0.0
     firecrawl_price_per_request: float = 0.0
     embedding_price_per_mtok: float = 0.0
