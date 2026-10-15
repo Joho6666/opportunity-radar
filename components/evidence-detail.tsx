@@ -86,12 +86,14 @@ function ConvertForm({ record, onCancel, onSubmit }: { record: EvidenceRecord; o
   );
 }
 
-export function EvidenceDetail({ record, selected, converting, onSelect, onReview, onStartConvert, onCancelConvert, onConvert }: {
+export function EvidenceDetail({ record, selected, converting, notesDraft, onNotesDraft, onSelect, onReview, onStartConvert, onCancelConvert, onConvert }: {
   record: EvidenceRecord;
   selected: boolean;
+  notesDraft?: string;
+  onNotesDraft?: (value:string)=>void;
   converting: boolean;
   onSelect: () => void;
-  onReview: (input: EvidenceReviewInput) => Promise<void>;
+  onReview: (input: EvidenceReviewInput) => Promise<boolean>;
   onStartConvert: () => void;
   onCancelConvert: () => void;
   onConvert: (input: EvidenceReviewInput) => Promise<void>;
@@ -102,7 +104,7 @@ export function EvidenceDetail({ record, selected, converting, onSelect, onRevie
   const src = sourceOf(record);
   const author = authorOf(record);
   const savedNotes = String(record.notes ?? "");
-  const [notes, setNotes] = useState(savedNotes);
+  const [notes, setNotes] = useState(notesDraft ?? savedNotes);
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [assessmentOpen,setAssessmentOpen] = useState(false);
@@ -110,16 +112,16 @@ export function EvidenceDetail({ record, selected, converting, onSelect, onRevie
   const [payment,setPayment] = useState(record.assessment?.payment ?? "unknown");
   const [eligibility,setEligibility] = useState(record.assessment?.eligibility ?? "needs_review");
   const [group,setGroup] = useState(String(record.metadata?.label_group ?? ""));
-  useEffect(() => { setNotes(savedNotes); }, [savedNotes]);
+  useEffect(() => { if(notesDraft === undefined)setNotes(savedNotes); }, [savedNotes,notesDraft]);
   const long = record.raw_text.length > 280;
   const converted = typeof record.converted_opportunity_id === "string" && record.converted_opportunity_id;
   const urgency = typeof record.urgency_signal === "string" ? record.urgency_signal : null;
-  const confidence = typeof record.classification_confidence === "number" ? Math.round(record.classification_confidence * 100) : null;
+  const confidence = record.classification_source === "unclassified" ? null : typeof record.classification_confidence === "number" ? Math.round(record.classification_confidence * 100) : null;
   const published = shortDate(record.ranking ? record.ranking.signals.published_at : record.published_at);
 
   return (
     <article
-      id={`evidence-${record.evidence_id}`}
+      data-evidence-detail={record.evidence_id}
       onClick={onSelect}
       className={cn(
         "relative min-w-0 bg-white p-4",
@@ -127,8 +129,8 @@ export function EvidenceDetail({ record, selected, converting, onSelect, onRevie
       )}
     >
       <span className={cn("absolute inset-y-3 left-0 w-0.5 rounded-full transition", selected ? "bg-ai" : "bg-transparent")} />
-      <div className="flex gap-3">
-        <div title={`证据等级 ${grade}`} className={cn("mono flex h-10 w-10 shrink-0 items-center justify-center rounded-md border text-lg font-semibold", GRADE_TONE[grade])}>{grade}</div>
+      <div>
+        <div title={`证据等级 ${grade}`} className={cn("mono mb-3 inline-flex items-center rounded-md border px-2 py-1 text-xs font-semibold", GRADE_TONE[grade])}>证据等级 {grade}</div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <span className={cn("rounded-full border px-2 py-0.5", STATUS_META[status].tone)}>{STATUS_META[status].label}</span>
@@ -174,12 +176,13 @@ export function EvidenceDetail({ record, selected, converting, onSelect, onRevie
             <input
               aria-label="复核备注"
               value={notes}
-              onChange={(event) => setNotes(event.target.value.slice(0, 2000))}
+              onChange={(event) => {const value=event.target.value.slice(0,2000);setNotes(value);onNotesDraft?.(value);}}
               onBlur={() => { if (notes !== savedNotes) void onReview({ notes }); }}
               onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
               placeholder="备注（离开输入框自动保存）"
               className="h-8 min-w-40 flex-1 rounded border border-line bg-ink px-2 text-xs text-mist outline-none focus:border-ai"
             />
+            {notes!==savedNotes&&<Button variant="secondary" onClick={()=>void onReview({notes})}>重试保存备注</Button>}
             {record.category === "buyer" && record.assessment?.actionable_candidate !== false && !converted && status !== "invalidated" && !converting && (
               <Button className="min-h-8 px-2.5 text-xs" onClick={onStartConvert}>
                 <ArrowRight size={13} />{status === "verified" ? "转为机会" : "核实并转为机会"} {selected && <Kbd>C</Kbd>}

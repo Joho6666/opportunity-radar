@@ -57,6 +57,7 @@ function isTyping(target: EventTarget | null) {
  const el=target as HTMLElement|null;return !!el&&(el.matches("input,textarea,select")||el.isContentEditable);
 }
 function EvidenceInbox() {
+  const [noteDrafts,setNoteDrafts]=useState<Record<string,string>>({});
   const [records, setRecords] = useState<EvidenceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +154,7 @@ function EvidenceInbox() {
     const previous: ReviewStatus = statusOf(record);
     try {
       applyRecord(await reviewEvidence(record.evidence_id, input));
+      if(input.notes!==undefined)setNoteDrafts(previous=>{const next={...previous};delete next[record.evidence_id];return next;});
       if (input.verification_status && input.verification_status !== previous) {
         const label = input.verification_status === "verified" ? "已核实" : input.verification_status === "invalidated" ? "已排除" : "已退回待复核";
         showToast({
@@ -164,8 +166,10 @@ function EvidenceInbox() {
       } else if (input.notes !== undefined) {
         showToast({ message: "备注已保存" });
       }
+      return true;
     } catch (reason) {
       showToast({ message: reason instanceof Error ? reason.message : "复核失败" });
+      return false;
     }
   }, [applyRecord, showToast]);
 
@@ -268,7 +272,7 @@ function EvidenceInbox() {
   const requestPrice = runtime?.sources[source]?.estimated_request_cost_usd;
   const paidBlocked = billable && (!manualConfirmed || !runtime?.paid_api_enabled || !requestPrice || (runtime.billing_batch && (!runtime.billing_batch.enabled || runtime.billing_batch.remaining_requests < 1 || runtime.billing_batch.remaining_cost_usd < requestPrice)));
 
-  function renderDetail(record: EvidenceRecord) {return <EvidenceDetail key={record.evidence_id} record={record} selected converting={record.evidence_id===convertingId} onSelect={()=>undefined} onReview={input=>review(record,input)} onStartConvert={()=>void startConvert(record)} onCancelConvert={()=>{setConvertingId(null);const left=recordsRef.current.find(item=>item.evidence_id===record.evidence_id);if(left)applyRecord(left,record.evidence_id,null);}} onConvert={input=>convert(record,input)}/>;}
+  function renderDetail(record: EvidenceRecord) {return <EvidenceDetail key={record.evidence_id} record={record} notesDraft={noteDrafts[record.evidence_id]} onNotesDraft={value=>setNoteDrafts(p=>({...p,[record.evidence_id]:value}))} selected converting={record.evidence_id===convertingId} onSelect={()=>undefined} onReview={input=>review(record,input)} onStartConvert={()=>void startConvert(record)} onCancelConvert={()=>{setConvertingId(null);const left=recordsRef.current.find(item=>item.evidence_id===record.evidence_id);if(left)applyRecord(left,record.evidence_id,null);}} onConvert={input=>convert(record,input)}/>;}
 
   return (
     <>
@@ -320,17 +324,18 @@ function EvidenceInbox() {
         <div className="mt-2 flex flex-wrap items-center gap-3"><input ref={fileInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} /><Button variant="secondary" onClick={() => fileInput.current?.click()} disabled={importing}><Upload size={15} /> 读取文件</Button><Button onClick={() => void importEvidence()} disabled={!importText.trim() || importing}>{importing && <Loader2 size={15} className="animate-spin" />}{importing ? "导入中…" : "提交导入"}</Button>{importState && <span className="text-sm text-muted">{importState}</span>}</div>
       </Panel>}
 
-      <div role="group" aria-label="证据分类" className="mb-2 flex flex-wrap gap-1 border-b border-line pb-2">{EVIDENCE_CATEGORIES.map(item=><button key={item} aria-pressed={category===item} onClick={()=>{setCategory(item);setSourceFilter(null);}} className={cn("min-h-10 rounded-md px-3 text-sm transition-colors",category===item?"bg-indigo-50 font-medium text-ai":"text-muted hover:bg-white")}>{CATEGORY_LABELS[item]} <span className="mono text-xs">{loading?"…":counts[item].all}</span></button>)}</div>
+      <div className="mb-2 grid grid-cols-2 gap-2 sm:hidden"><select aria-label="移动端分类" className="min-w-0 rounded-md border border-line px-2 text-xs" value={category} onChange={e=>{setCategory(e.target.value as EvidenceCategory);setSourceFilter(null);}}>{EVIDENCE_CATEGORIES.map(item=><option value={item} key={item}>{CATEGORY_LABELS[item]} ({loading?"…":error?"未知":counts[item].all})</option>)}</select><select aria-label="移动端复核状态" className="min-w-0 rounded-md border border-line px-2 text-xs" value={status} onChange={e=>setStatus(e.target.value as import("@/lib/evidence-view").StatusFilter)}>{STATUS_FILTERS.map(item=><option value={item.value} key={item.value}>{item.label} ({loading?"…":error?"未知":counts[category][item.value]})</option>)}</select></div>
+      <div role="group" aria-label="证据分类" className="mb-2 hidden sm:flex flex-wrap gap-1 border-b border-line pb-2">{EVIDENCE_CATEGORIES.map(item=><button key={item} aria-pressed={category===item} onClick={()=>{setCategory(item);setSourceFilter(null);}} className={cn("min-h-10 rounded-md px-3 text-sm transition-colors",category===item?"bg-indigo-50 font-medium text-ai":"text-muted hover:bg-white")}>{CATEGORY_LABELS[item]} <span className="mono text-xs">{loading?"…":error?"未知":counts[item].all}</span></button>)}</div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <div className="flex rounded-md border border-line bg-panel/60 p-0.5" role="group" aria-label="复核状态">
+        <div className="hidden rounded-md border border-line bg-panel/60 p-0.5 sm:flex" role="group" aria-label="复核状态">
           {STATUS_FILTERS.map((item) => (
             <button key={item.value} onClick={() => setStatus(item.value)} aria-pressed={status === item.value} className={cn("rounded px-2.5 py-1 text-xs transition", status === item.value ? "bg-indigo-50 text-ai" : "text-muted hover:text-mist")}>
-              {item.label} <span className="mono opacity-70">{counts[category][item.value]}</span>
+              {item.label} <span className="mono opacity-70">{loading?"…":error?"未知":counts[category][item.value]}</span>
             </button>
           ))}
         </div>
-        <label className="relative min-w-48 flex-1">
+        <label className="relative min-w-48 basis-full sm:basis-auto flex-1">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
           <input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setSearch(""); event.currentTarget.blur(); } }} placeholder="在当前分类里搜索原文或备注" aria-label="搜索证据" className="h-8 w-full rounded-md border border-line bg-panel/60 pl-8 pr-8 text-xs text-mist outline-none focus:border-ai" />
           <span className="absolute right-2 top-1/2 -translate-y-1/2"><span className="text-xs text-muted">/</span></span>
@@ -350,9 +355,9 @@ function EvidenceInbox() {
           ? <EmptyState title={`「${CATEGORY_LABELS[category]}」已全部复核完 🎉`}><p className="text-sm text-muted">核实 {counts[category].verified} 条，排除 {counts[category].invalidated} 条。</p><Button className="mt-4" variant="secondary" onClick={() => setStatus("verified")}>查看已核实</Button></EmptyState>
           : <EmptyState title={search ? `没有匹配「${search}」的证据` : `还没有${CATEGORY_LABELS[category]}`}>{!search && <><p className="text-sm text-muted">可以先采集一次，或者导入一批真实来源数据。</p><Button className="mt-4" onClick={() => setCollectorOpen(true)}>开始采集</Button></>}</EmptyState>
       )}
-      {!loading && !error && visible.length > 0 && <div className="grid items-start gap-0 overflow-hidden rounded-lg border border-line bg-white xl:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="min-w-0"><div className="flex min-h-9 items-center justify-between border-b border-line bg-slate-50 px-4 text-xs text-muted"><span>{visible.length} 条候选 · 选择查看依据</span><span>预测分数 ≠ 成交概率</span></div><div className="divide-y divide-line">{visible.map(record=><button key={record.evidence_id} id={`evidence-${record.evidence_id}`} data-evidence-row type="button" aria-pressed={selectedId===record.evidence_id} onClick={()=>setSelectedId(record.evidence_id)} className={cn("block w-full border-l-2 px-4 py-3 text-left transition-colors",record.evidence_id===selectedId?"border-ai bg-indigo-50/60":"border-transparent hover:bg-slate-50")}><div className="flex items-start justify-between gap-3"><p className="line-clamp-2 text-sm font-medium leading-6">{record.raw_text.split("\n").find(Boolean)?.slice(0,180)}</p><span className="mono shrink-0 rounded bg-ink px-2 py-1 text-xs text-ai" title="获客优先级预测分数">{record.ranking?.lead_score ?? "未知"}<span className="ml-1 text-muted">分</span></span></div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted"><span>{sourceOf(record).label}</span><span>{shortDate(record.ranking?.signals.published_at ?? record.published_at) ?? "发布时间未知"}</span><span>{evidenceBudgetLabel(record)}</span><span>证据 {gradeOf(record)}</span><span className={statusOf(record)==="verified"?"text-signal":"text-amber-800"}>{statusOf(record)==="verified"?"人工已核实":statusOf(record)==="invalidated"?"已排除":"待复核"}</span></div></button>)}</div></div>
-        <aside aria-label="证据详情" className="sticky top-20 hidden max-h-[calc(100vh-100px)] overflow-y-auto border-l border-line xl:block">{selected ? renderDetail(selected) : <div className="p-8 text-center text-sm text-muted">选择一条线索，查看原文和核实依据。</div>}</aside>
+      {!loading && !error && visible.length > 0 && <div className="grid items-start gap-0 rounded-lg border border-line bg-white xl:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="min-w-0"><div className="flex min-h-9 items-center justify-between border-b border-line bg-slate-50 px-4 text-xs text-muted"><span>{visible.length} 条候选 · 选择查看依据</span><span>预测分数 ≠ 成交概率</span></div><div className="divide-y divide-line">{visible.map(record=><button key={record.evidence_id} id={`evidence-${record.evidence_id}`} data-evidence-row type="button" aria-pressed={selectedId===record.evidence_id} onClick={()=>setSelectedId(record.evidence_id)} className={cn("block w-full border-l-2 px-4 py-3 text-left transition-colors",record.evidence_id===selectedId?"border-ai bg-indigo-50/60":"border-transparent hover:bg-slate-50")}><div className="flex items-start justify-between gap-3"><p className="line-clamp-2 text-sm font-medium leading-6">{record.raw_text.split("\n").find(Boolean)?.slice(0,180)}</p><span className="mono shrink-0 rounded bg-ink px-2 py-1 text-xs text-ai" title="获客优先级预测分数">{record.ranking?.lead_score ?? "未知"}<span className="ml-1 text-muted">分</span></span></div><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted"><span>{sourceOf(record).label}</span><span>{shortDate(record.ranking ? record.ranking.signals.published_at : record.published_at) ?? "发布时间未知"}</span><span>{evidenceBudgetLabel(record)}</span><span>证据 {gradeOf(record)}</span><span className={statusOf(record)==="verified"?"text-signal":"text-amber-800"}>{statusOf(record)==="verified"?"人工已核实":statusOf(record)==="invalidated"?"已排除":"待复核"}</span></div></button>)}</div></div>
+        <aside aria-label="证据详情" className="sticky top-20 hidden max-h-[calc(100vh-100px)] overflow-y-auto border-l border-line xl:block">{wide&&selected ? renderDetail(selected) : <div className="p-8 text-center text-sm text-muted">选择一条线索，查看原文和核实依据。</div>}</aside>
       </div>}
       <DetailDrawer open={!wide&&!!selected} title="证据详情" onClose={()=>{setConvertingId(null);setSelectedId(null);}}>{selected&&renderDetail(selected)}</DetailDrawer>
 
