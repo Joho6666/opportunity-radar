@@ -41,3 +41,20 @@ REDIS_URL='' TEST_REDIS_URL=redis://127.0.0.1:6379 \
 CI使用[现有工作流](https://github.com/Joho6666/opportunity-radar/actions/workflows/ci.yml)，覆盖`feat/**`和PR；当前提交远程结果以[PR #2](https://github.com/Joho6666/opportunity-radar/pull/2)检查及本轮交付的精确HEAD CI链接为准。不能拿旧提交绿灯代表新提交。
 
 没有将免登录开发检查当成生产Supabase登录验证，没有将语义页面检查当成截图视觉验收。真实客户转化、人工筛选时间和每条核实线索成本未测量。
+
+## 追加：客户端关键词、时效、热度与帖子评分
+
+本次起点 `c72c099`。客户端新增共享采集配置：包含/排除词、任意/全部命中、1–720小时、发布时间/来源更新时间、时间未知策略、公开作者/累计评论信号、最低互动和已取得结果热度排序；配置通过新增JSONB列持久化。手动收件箱实际传递条件，雷达编辑清除过时查询计划，策略绑定幂等请求和国内续页。详情显示实际查询，不再显示页面虚构的AI策略。
+
+修复：刚采到的未知时间不再冒充最新帖子；正文明确“接单私信我”不能被泛化外包标题翻成买方；同帖互动数会更新但不重复产生客户，也不覆盖人工复核；手动雷达不会被Scheduler自动执行。获客分和热度分独立，卖家/排除/关闭/不适用获客分为0；缺少个性化预算门槛等输入采用中性分并说明。
+
+| 验证 | 本次结果 |
+|---|---|
+| 全部后端 | 343项通过，0跳过；包括真实PG/pgvector、Redis、迁移/RLS、配额/幂等/并发、策略持久化、国内空页续页绑定、重复观察与人工复核保留；1条Starlette上游弃用警告 |
+| 前端 | lint、TypeScript、41项Vitest、Next生产构建通过；Zustand测试环境存储警告仍有，无失败 |
+| Ego隔离功能 | 8014/3003独立合成QA身份，5条固定原文；24小时、排除教程、包含PPT、作者与评论筛选→保留2条；旧帖1/未知时间1/教程1分别被过滤；买方与广告分开，广告热度99而获客0 |
+| Ego保存与费用 | 创建雷达→编辑至48小时/排除教程和广告→刷新仍保留→运行显示真实订阅地址查询；付费按钮被价格/总开关阻断 |
+| 主应用 | 8013/3002已重新加载；`/ready`为PostgreSQL，主身份没有写入测试帖子或客户；累计批次仍0次/$0预留，剩余5次/$0.50，实际账单未知 |
+| 未验证 | 没有国内真实接口/热门端点调用、真人身份核验、近期评论时间、真实留出分类效果或客户成交验证；没有截图视觉验收。热度仅是已取得内容的排序，不是平台热榜 |
+
+新增SQL为 `202610140002_collection_policy.sql`，不修改历史迁移、删除业务数据或合并main。使用说明：[KEYWORD_COLLECTION](KEYWORD_COLLECTION.md)。原始日志为Git忽略的 `outputs/keyword-backend-test.log`、`keyword-lint.log`、`keyword-typecheck.log`、`keyword-frontend-test.log`、`keyword-build.log`、`keyword-ego-result.json`、`keyword-runtime-before.json`和`keyword-runtime-after.json`。旧CI链接仅说明旧提交，本次以PR最新精确HEAD检查为准。
