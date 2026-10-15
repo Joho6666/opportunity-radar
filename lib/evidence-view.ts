@@ -2,7 +2,7 @@ import type { EvidenceCategory, EvidenceRecord } from "@/lib/evidence-client";
 
 export type ReviewStatus = "unverified" | "verified" | "invalidated" | "disputed";
 export type StatusFilter = "pending" | "verified" | "invalidated" | "all";
-export type SortMode = "grade" | "latest";
+export type SortMode = "grade" | "latest" | "hot" | "lead";
 
 export const CATEGORY_LABELS: Record<EvidenceCategory, string> = {
   buyer: "潜在购买需求",
@@ -104,10 +104,13 @@ export function sourcesIn(records: EvidenceRecord[], category: EvidenceCategory)
 
 export function visibleRecords(records: EvidenceRecord[], options: { category: EvidenceCategory; status: StatusFilter; search: string; sort: SortMode; keep?: string | null; source?: string | null }): EvidenceRecord[] {
   const rank = { A: 0, B: 1, C: 2 };
-  const time = (record: EvidenceRecord) => new Date(record.published_at ?? record.captured_at).getTime() || 0;
+  const time = (record: EvidenceRecord) => new Date((record.ranking ? record.ranking.signals.published_at : record.published_at) ?? "").getTime() || 0;
+  const score = (record: EvidenceRecord) => options.sort === "hot" ? record.ranking?.signals.heat_score ?? -1 : record.ranking?.lead_score ?? -1;
   return records
     .filter((record) => record.category === options.category && (record.evidence_id === options.keep || (matchesStatus(record, options.status) && matchesSearch(record, options.search) && (!options.source || sourceOf(record).key === options.source))))
-    .sort((a, b) => options.sort === "latest"
+    .sort((a, b) => options.sort === "hot" || options.sort === "lead"
+      ? score(b) - score(a) || time(b) - time(a)
+      : options.sort === "latest"
       ? time(b) - time(a)
       : rank[gradeOf(a)] - rank[gradeOf(b)] || (b.classification_confidence ?? 0) - (a.classification_confidence ?? 0) || time(b) - time(a));
 }

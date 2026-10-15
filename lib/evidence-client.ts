@@ -1,4 +1,7 @@
 import { getAccessToken } from "@/lib/auth";
+import type { CollectionPolicy } from "@/lib/collection-policy";
+
+export type PostRanking = {kind:"prediction";lead_score:number;label:string;reasons:string[];signals:{published_at:string|null;last_activity_at:string|null;age_hours:number|null;author_visible:boolean;identity_status:"unverified";comments:number|null;interactions:number|null;heat_score:number|null;heat_reason:string}};
 
 export const EVIDENCE_CATEGORIES = ["buyer", "seller", "job", "content", "market"] as const;
 export type EvidenceCategory = (typeof EVIDENCE_CATEGORIES)[number];
@@ -27,6 +30,7 @@ export type EvidenceRecord = {
   acquisition_tool?: string;
   metadata?: Record<string, unknown>;
   assessment?: DemandAssessment;
+  ranking?: PostRanking;
   [key: string]: unknown;
 };
 
@@ -85,8 +89,8 @@ export const KEYWORD_PRESETS: { group: string; source: EvidenceSource; query: st
   {group:"企业视频与开发",source:"weibo",query:"找人做网站"},
 ];
 export type CollectionAttempt = { fingerprint: string; requestId: string };
-export function collectionAttempt(previous: CollectionAttempt | null, source: EvidenceSource, query: string, cursor?: string, batchId?: string): CollectionAttempt {
-  const fingerprint = JSON.stringify([source,query.trim(),cursor ?? null,batchId ?? null]);
+export function collectionAttempt(previous: CollectionAttempt | null, source: EvidenceSource, query: string, cursor?: string, batchId?: string, configKey?: string): CollectionAttempt {
+  const fingerprint = JSON.stringify([source,query.trim(),cursor ?? null,batchId ?? null,configKey ?? null]);
   return previous?.fingerprint === fingerprint ? previous : {fingerprint,requestId:crypto.randomUUID()};
 }
 export type SourceYield = {collected:number;evidence:number;buyer:number;verified_buyer:number;buyer_ratio:number|null};
@@ -99,7 +103,7 @@ export type EvidenceRuntime = {
   warning: string | null;
   sources: Record<EvidenceSource, { configured: boolean; estimated_request_cost_usd?: number | null; validation_status?: string; live_verified?: boolean; pricing_evidence?: {source_url:string;verified_at:string;unit:string} | null }>;
 };
-export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; billing_batch_id?:string|null;request_id?:string|null; fetched: number; rejected: number; stale?:number; warning: string | null };
+export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; billing_batch_id?:string|null;request_id?:string|null; fetched: number; rejected: number; stale?:number; filtered?:{stale:number;unknown_date:number;terms:number;activity:number}; warning: string | null };
 
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8011";
 
@@ -164,11 +168,11 @@ export async function fetchEvidenceRuntime(): Promise<EvidenceRuntime> {
 export async function fetchAcquisitionMetrics(): Promise<AcquisitionMetrics> {
   return request<AcquisitionMetrics>("/api/dashboard/acquisition");
 }
-export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean, cursor?: string, requestId?: string, batchId?:string|null): Promise<EvidenceCollectResult> {
+export async function collectEvidence(source: EvidenceSource, query: string, manualConfirmed: boolean, cursor?: string, requestId?: string, batchId?:string|null, config?:{freshness_hours:number;policy:CollectionPolicy}): Promise<EvidenceCollectResult> {
   const params = new URLSearchParams({ source, query });
   return request<EvidenceCollectResult>(`/api/intelligence/evidence/collect?${params.toString()}`, {
     method: "POST",
-    body: JSON.stringify({ manual_confirmed: manualConfirmed, ...(cursor ? {cursor} : {}), ...(requestId ? {request_id:requestId} : {}), ...(batchId ? {billing_batch_id:batchId} : {}) }),
+    body: JSON.stringify({ manual_confirmed: manualConfirmed, ...(cursor ? {cursor} : {}), ...(requestId ? {request_id:requestId} : {}), ...(batchId ? {billing_batch_id:batchId} : {}), ...config }),
   });
 }
 

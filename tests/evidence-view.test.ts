@@ -29,6 +29,18 @@ describe("evidence view helpers", () => {
     expect(visibleRecords(records, { category: "buyer", status: "all", search: "", sort: "grade" }).map((r) => r.evidence_id)).toEqual(["a-high", "a-low", "c"]);
   });
 
+  it("does not treat a freshly captured undated post as newly published",()=>{
+    const rows=[record("undated",{captured_at:"2099-01-01T00:00:00Z"}),record("published",{published_at:"2026-01-01T00:00:00Z"})];
+    expect(visibleRecords(rows,{category:"buyer",status:"all",search:"",sort:"latest"}).map(r=>r.evidence_id)).toEqual(["published","undated"]);
+  });
+
+  it("keeps viral ads out of buyer results and sorts unknown heat last",()=>{
+    const ranking=(lead:number,heat:number|null)=>({kind:"prediction" as const,lead_score:lead,label:"prediction",reasons:[],signals:{published_at:null,last_activity_at:null,age_hours:null,author_visible:false,identity_status:"unverified" as const,comments:null,interactions:null,heat_score:heat,heat_reason:"test"}});
+    const rows=[record("unknown"),record("buyer",{ranking:ranking(75,5)}),record("hot",{ranking:ranking(60,80)}),record("ad",{category:"seller",ranking:ranking(0,100)})];
+    expect(visibleRecords(rows,{category:"buyer",status:"all",search:"",sort:"hot"}).map(r=>r.evidence_id)).toEqual(["hot","buyer","unknown"]);
+    expect(visibleRecords(rows,{category:"buyer",status:"all",search:"",sort:"lead"}).map(r=>r.evidence_id)).toEqual(["buyer","hot","unknown"]);
+  });
+
   it("search matches text and notes, case-insensitively", () => {
     const records = [record("a", { raw_text: "Need a Shopify developer" }), record("b", { notes: "老客户转介绍" })];
     expect(visibleRecords(records, { category: "buyer", status: "all", search: "shopify", sort: "grade" }).map((r) => r.evidence_id)).toEqual(["a"]);

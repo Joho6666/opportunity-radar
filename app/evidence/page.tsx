@@ -1,5 +1,7 @@
 "use client";
 import { BillingPanel } from "@/components/billing-panel";
+import { CollectionControls } from "@/components/collection-controls";
+import { DEFAULT_COLLECTION_POLICY, policyKey, validPolicy, type CollectionPolicy } from "@/lib/collection-policy";
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -182,7 +184,7 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
   const converted = typeof record.converted_opportunity_id === "string" && record.converted_opportunity_id;
   const urgency = typeof record.urgency_signal === "string" ? record.urgency_signal : null;
   const confidence = typeof record.classification_confidence === "number" ? Math.round(record.classification_confidence * 100) : null;
-  const published = shortDate(record.published_at);
+  const published = shortDate(record.ranking ? record.ranking.signals.published_at : record.published_at);
 
   return (
     <article
@@ -211,6 +213,11 @@ function EvidenceRow({ record, selected, converting, onSelect, onReview, onStart
           </div>
           {record.metadata?.needs_review === "true" && <p className="mt-2 text-xs text-amber-200">存在分类冲突或原文更新，请重新核实；最新规则分类：{String(record.metadata.latest_predicted_category ?? record.category)}</p>}
           <p className="mt-2 text-xs text-muted">{evidenceBudgetLabel(record)} · 需求真实性：{status === "verified" ? "人工已核实" : "待人工核实"} · 采集 {shortDate(record.captured_at)}</p>
+          {record.ranking && <div className="mt-2 rounded border border-line p-2 text-xs text-muted">
+            <p><span className="font-medium text-mist">获客优先级 {record.ranking.lead_score}/100</span> · 热度 {record.ranking.signals.heat_score === null ? "未知" : `${record.ranking.signals.heat_score}/100`} · {record.ranking.signals.author_visible ? "公开作者可见" : "作者未知"} · 真人身份待核实</p>
+            <p className="mt-1">{record.ranking.label}</p>
+            {selected && <details className="mt-1"><summary className="cursor-pointer text-indigo-200">评分依据与活跃信号</summary><ul className="mt-2 list-inside list-disc space-y-1">{record.ranking.reasons.map((reason,index)=><li key={index}>{reason}</li>)}</ul><p className="mt-2">{record.ranking.signals.heat_reason}</p><p>来源最近活动：{shortDate(record.ranking.signals.last_activity_at) ?? "未知"} · 累计评论：{record.ranking.signals.comments ?? "未知"}（评论发生时间未知）</p></details>}
+          </div>}
           {record.assessment && <div className="mt-2 text-xs text-muted"><p>需求状态：{{open:"有效",closed:"已关闭或过期",unknown:"未知"}[record.assessment.availability]} · 支付证据：{{explicit:"原文明确",unknown:"未知",no_budget:"明确无预算",conflicting:"冲突"}[record.assessment.payment]} · 服务适用性：{{eligible:"人工确认适用",excluded:"不适用",needs_review:"待核实"}[record.assessment.eligibility]}</p><p>{record.assessment.reason}</p>{[record.assessment.availability_quote,record.assessment.payment_quote,record.assessment.eligibility_quote].filter(Boolean).map((quote,i)=><p key={i} className="mt-1 text-amber-100">原文依据：{quote}</p>)}</div>}
           {Boolean(record.metadata?.local_fallback) && <p className="mt-2 text-xs text-muted">本地模型回退规则：{String(record.metadata?.local_fallback)}</p>}
           {Boolean(record.metadata?.local_category) && <p className="mt-2 text-xs text-muted">本地模型 {String(record.metadata?.local_mode)}：{String(record.metadata?.local_category)} · 置信度 {String(record.metadata?.local_confidence)}{record.metadata?.local_truncated === "true" ? " · 长文截断，需复核" : ""}</p>}
@@ -271,7 +278,7 @@ function EvidenceInbox() {
   const [category, setCategory] = useState<EvidenceCategory>("buyer");
   const [status, setStatus] = useState<StatusFilter>("pending");
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortMode>("grade");
+  const [sort, setSort] = useState<SortMode>("lead");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
@@ -283,9 +290,14 @@ function EvidenceInbox() {
   const [collectorOpen, setCollectorOpen] = useState(false);
   const [source, setSource] = useState<EvidenceSource>("rss");
   const [query, setQuery] = useState("");
+  const [policy, setPolicy] = useState<CollectionPolicy>(DEFAULT_COLLECTION_POLICY);
+  const [freshnessHours, setFreshnessHours] = useState(72);
+  const configKey = policyKey(policy, freshnessHours);
+  const configValid = validPolicy(policy) && Number.isInteger(freshnessHours) && freshnessHours >= 1 && freshnessHours <= 720;
   const [manualConfirmed, setManualConfirmed] = useState(false);
+  useEffect(()=>{setManualConfirmed(false);},[source,query,configKey]);
   const [collecting, setCollecting] = useState(false);
-  const [nextPage, setNextPage] = useState<{source: EvidenceSource; query: string; cursor: string} | null>(null);
+  const [nextPage, setNextPage] = useState<{source: EvidenceSource; query: string; cursor: string; configKey: string} | null>(null);
   const [collectState, setCollectState] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -434,16 +446,18 @@ function EvidenceInbox() {
 
   async function collect(cursor?: string) {
     if (!query.trim()) { setCollectState("请先填写搜索词"); return; }
+    if (!configValid) { setCollectState("时间窗口需为1–720小时；每组最多20个词，每词最多100字；互动数需为有效整数。"); return; }
     setCollecting(true);
     setCollectState(null);
     try {
-      const attempt = collectionAttempt(attemptRef.current,source,query,cursor,runtime?.billing_batch_id ?? undefined);
+      const attempt = collectionAttempt(attemptRef.current,source,query,cursor,runtime?.billing_batch_id ?? undefined,configKey);
       attemptRef.current = attempt;
-      const result = await collectEvidence(source, query.trim(), manualConfirmed, cursor, attempt.requestId,runtime?.billing_batch_id);
+      const result = await collectEvidence(source, query.trim(), manualConfirmed, cursor, attempt.requestId,runtime?.billing_batch_id,{freshness_hours:freshnessHours,policy});
       attemptRef.current = null;
-      setNextPage(result.next_cursor ? {source,query:query.trim(),cursor:result.next_cursor} : null);
+      setNextPage(result.next_cursor ? {source,query:query.trim(),cursor:result.next_cursor,configKey} : null);
+      setSort(policy.sort);
       setManualConfirmed(false);
-      setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，过期 ${result.stale ?? 0} 条，拒绝 ${result.rejected} 条`);
+      setCollectState(`采集 ${result.fetched} 条，新增 ${result.inserted} 条，重复 ${result.duplicates} 条，过期 ${result.stale ?? 0} 条，时间未知过滤 ${result.filtered?.unknown_date ?? 0} 条，关键词过滤 ${result.filtered?.terms ?? 0} 条，活跃信号过滤 ${result.filtered?.activity ?? 0} 条，拒绝 ${result.rejected} 条`);
       await load();
     } catch (reason) {
       setCollectState(reason instanceof Error ? reason.message : "采集失败");
@@ -508,15 +522,17 @@ function EvidenceInbox() {
             {EVIDENCE_SOURCES.map((item) => <option key={item} value={item} disabled={runtime ? !runtime.sources[item]?.configured : false}>{SOURCE_LABELS[item]}{BILLABLE_SOURCES.has(item) ? " · 收费" : ""}{runtime && !runtime.sources[item]?.configured ? "（未配置）" : ""}</option>)}
           </select>
           <input value={query} onChange={(event) => setQuery(event.target.value.slice(0, 200))} placeholder={source === "rss" ? "RSS 地址，或点下面的预设" : "搜索词，回车开始；问句更容易搜到买家，如「有人接剪辑吗」"} aria-label="搜索词" className="rounded-lg border border-line bg-ink px-3 py-2 text-sm text-mist outline-none focus:border-ai" />
-          <Button type="submit" disabled={collecting || !runtime?.sources[source]?.configured || !!paidBlocked}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
+          <Button type="submit" disabled={collecting || !configValid || !runtime?.sources[source]?.configured || !!paidBlocked}>{collecting && <Loader2 size={15} className="animate-spin" />}{collecting ? "采集中…" : "开始采集"}</Button>
         </form>
         {source === "rss" && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">免费预设：{FEED_PRESETS.map((preset) => <button key={preset.url} type="button" onClick={() => setQuery(preset.url)} className={cn("rounded border px-2 py-0.5 transition", query === preset.url ? "border-ai/60 text-indigo-100" : "border-line hover:text-mist")}>{preset.label}</button>)}</div>}
         {["个人文档","企业视频与开发"].map(group => <div key={group} className="mt-2 flex flex-wrap gap-2 text-xs text-muted"><span>{group}：</span>{KEYWORD_PRESETS.filter(x => x.group === group).map(preset => <button type="button" key={preset.query} className="rounded border border-line px-2 py-1 hover:text-mist" onClick={() => {setSource(preset.source);setQuery(preset.query);setManualConfirmed(false);}}>{preset.query}</button>)}</div>)}
+        <CollectionControls policy={policy} onChange={next=>{setPolicy(next);setManualConfirmed(false);}} hours={freshnessHours} onHours={hours=>{setFreshnessHours(hours);setManualConfirmed(false);}} disabled={collecting}/>
+        <p className="mt-2 text-xs text-muted">{source === "rss" ? "RSS只读取所选订阅源，包含词在原文中筛选；不是全网关键词搜索。" : "筛选范围受平台实际返回结果限制；热门排序只比较本次已取得的帖子。"}{["douyin","xiaohongshu"].includes(source) ? "当前国内搜索端点上游固定近一周，放宽本地时间窗口不会扩展上游范围；真实接口仍待验证。" : ""}</p>
         {billable && <p className="mt-2 text-xs text-amber-100">{requestPrice ? `此接口已核实单价 $${requestPrice.toFixed(4)} / 次；单击仅取一页。` : "接口价格未核实，付费采集被阻止。"}</p>}
         {runtime?.sources[source]?.validation_status && <p className="mt-2 text-xs text-muted">来源验证：{({contract_only:"离线契约通过；尚未实采验证",response_compatible:"已存真实响应可解析；分页与业务效果仍需核实",response_incompatible:"已存响应解析不兼容"} as Record<string,string>)[runtime.sources[source].validation_status ?? ""] ?? runtime.sources[source].validation_status}</p>}
         {runtime?.sources[source]?.pricing_evidence && <p className="mt-1 text-xs text-muted">价格依据：<a href={runtime.sources[source].pricing_evidence?.source_url} target="_blank" rel="noreferrer" className="underline">官方来源</a> · 核实 {shortDate(runtime.sources[source].pricing_evidence?.verified_at)}</p>}
         {billable && <label className="mt-2 flex items-center gap-2 text-xs text-amber-100"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} />该来源按调用收费，我确认本次采集</label>}
-        {nextPage && nextPage.source === source && nextPage.query === query.trim() && <Button className="mt-3" variant="secondary" disabled={collecting || !!paidBlocked} onClick={() => void collect(nextPage.cursor)}>采集下一页（独立请求）</Button>}
+        {nextPage && nextPage.source === source && nextPage.query === query.trim() && nextPage.configKey === configKey && <Button className="mt-3" variant="secondary" disabled={collecting || !configValid || !!paidBlocked} onClick={() => void collect(nextPage.cursor)}>采集下一页（独立请求）</Button>}
         {collectState && <p className="mt-2 text-sm text-muted">{collectState}</p>}
         {collectState && attemptRef.current && <Button className="mt-2" variant="secondary" onClick={() => {attemptRef.current=null;setManualConfirmed(false);setCollectState("已准备新的请求；如需付费，请重新确认，新的调用会占用额度。");}}>准备新的采集请求</Button>}
       </Panel>}
@@ -558,6 +574,8 @@ function EvidenceInbox() {
           <span className="absolute right-2 top-1/2 -translate-y-1/2"><Kbd>/</Kbd></span>
         </label>
         <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} aria-label="排序" className="h-8 rounded-md border border-line bg-panel/60 px-2 text-xs text-mist">
+          <option value="lead">获客分数优先</option>
+          <option value="hot">热度优先（已采集）</option>
           <option value="grade">等级优先</option>
           <option value="latest">最新优先</option>
         </select>

@@ -20,7 +20,7 @@ export function toOpportunity(raw: any): Opportunity {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function toRadar(raw: any): Radar {
   const status = raw.status === "paused" || raw.status === "error" || raw.status === "running" || raw.status === "active" ? raw.status : "active";
-  return { id: raw.id, name: raw.name, description: raw.description ?? "", status, goal: raw.goal ?? "", keywords: raw.keywords ?? [], locations: raw.locations ?? [], minimumBudget: raw.minimum_budget ?? 0, frequency: raw.frequency ?? "每天", sources: (raw.sources ?? ["mock"]) as Radar["sources"], lastRunAt: formatDateTime(raw.last_run_at, "未运行"), nextRunAt: formatDateTime(raw.next_run_at, "—"), stats: { scanned: raw.stats?.items_found ?? 0, found: raw.stats?.opportunities_found ?? 0, matched: raw.stats?.matched ?? 0, recommended: raw.stats?.recommended ?? 0 } };
+  return { id: raw.id, name: raw.name, description: raw.description ?? "", status, goal: raw.goal ?? "", keywords: raw.keywords ?? [], locations: raw.locations ?? [], minimumBudget: raw.minimum_budget ?? 0, frequency: raw.frequency ?? "每天", sources: (raw.sources ?? ["mock"]) as Radar["sources"], freshnessHours:raw.freshness_hours ?? 72, collectionPolicy:raw.collection_policy,listenerDescription:raw.listener_description ?? "",queries:raw.queries ?? [],lastRunAt: formatDateTime(raw.last_run_at, "未运行"), nextRunAt: raw.frequency === "manual" ? "手动运行" : formatDateTime(raw.next_run_at, "—"), stats: { scanned: raw.stats?.items_found ?? 0, found: raw.stats?.opportunities_found ?? 0, matched: raw.stats?.matched ?? 0, recommended: raw.stats?.recommended ?? 0 } };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
