@@ -1,3 +1,4 @@
+from uuid import uuid4
 import asyncio
 from jose import jwt
 from fastapi.testclient import TestClient
@@ -32,7 +33,7 @@ def test_mock_collector_deduplicates_and_analyzes():
 
 def test_query_planner_returns_structured_queries():
     async def scenario():
-        queries = await plan_queries(RadarCreate(name="客户雷达", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
+        queries = await plan_queries(RadarCreate(sources=["mock"], name="客户雷达", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"], locations=["桂林"]))
         assert queries[0].priority >= 70
         assert "PPT" in queries[0].query
     asyncio.run(scenario())
@@ -50,7 +51,7 @@ def test_radar_run_mock_pipeline_creates_opportunities():
     async def scenario():
         repo = MemoryRepository(); user_id = "test-user"
         repo.save_profile(user_id, ProfileUpsert(display_name="测试", skills=[{"name":"PPT","level":"strong"}], goals=["client"]))
-        radar = repo.create_radar(user_id, RadarCreate(name="PPT 雷达", goal="寻找桂林 PPT 有偿需求", minimum_budget=200, keywords=["PPT"], locations=["桂林"]))
+        radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="PPT 雷达", goal="寻找桂林 PPT 有偿需求", minimum_budget=200, keywords=["PPT"], locations=["桂林"]))
         run = repo.create_run(radar.id)
         result = await RadarRunService(repo).run(user_id, radar.id, run.id)
         assert result.status == "completed"
@@ -60,12 +61,12 @@ def test_radar_run_mock_pipeline_creates_opportunities():
 
 
 def test_api_radar_run_and_opportunity_action():
-    token = jwt.encode({"sub": "api-test-user", "aud": "authenticated"}, "", algorithm="HS256")
+    token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated"}, "offline-test-jwt-secret-not-for-deployment", algorithm="HS256")
     headers = {"Authorization": f"Bearer {token}"}
     with TestClient(app) as client:
         profile = client.put("/api/profile", headers=headers, json={"display_name":"测试用户","skills":[{"name":"PPT","level":"strong"}],"goals":["client"]})
         assert profile.status_code == 200
-        radar = client.post("/api/radars", headers=headers, json={"name":"测试雷达","goal":"寻找桂林 PPT 兼职","keywords":["PPT"],"locations":["桂林"]}).json()
+        radar = client.post("/api/radars", headers=headers, json={"sources":["mock"],"name":"测试雷达","goal":"寻找桂林 PPT 兼职","keywords":["PPT"],"locations":["桂林"]}).json()
         run = client.post(f"/api/radars/{radar['id']}/run", headers=headers)
         assert run.status_code == 202
         opportunities = client.get("/api/opportunities", headers=headers).json()

@@ -1,2 +1,2 @@
 import type { Config } from "tailwindcss";
-export default { content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./features/**/*.{ts,tsx}"], theme: { extend: { colors: { ink: "#051424", panel: "#0d1c2d", line: "#273647", mist: "#d4e4fa", muted: "#98a9bf", ai: "#818cf8", signal: "#4edea3" }, boxShadow: { glow: "0 0 22px rgb(129 140 248 / .16)" } } }, plugins: [] } satisfies Config;
+export default { content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./features/**/*.{ts,tsx}"], theme: { extend: { colors: { ink: "#F6F7F9", panel: "#FFFFFF", line: "#E2E8F0", mist: "#111827", muted: "#526072", ai: "#4F46E5", signal: "#047857" }, transitionDuration: { DEFAULT: "150ms" } } }, plugins: [] } satisfies Config;

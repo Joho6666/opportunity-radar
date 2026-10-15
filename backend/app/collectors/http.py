@@ -6,6 +6,7 @@ import socket
 from collections import defaultdict
 from urllib.parse import urlparse
 import httpx
+from ..core.config import get_settings
 from ..core.errors import AppError
 
 USER_AGENT = "OpportunityRadar/0.2 (+https://github.com/Joho6666/opportunity-radar)"
@@ -24,6 +25,8 @@ PRIVATE_NETWORKS = (
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("2001:db8::/32"),
 )
+# Proxies in fake-IP mode (Clash/Mihomo TUN, Surge, ...) answer every DNS query from this range.
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 
 
 def _is_blocked_ip(address: str) -> bool:
@@ -37,6 +40,8 @@ def validate_public_url(url: str, resolver=socket.getaddrinfo) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise AppError("BLOCKED_URL", "只允许 http/https 请求。", 400)
+    if parsed.username or parsed.password:
+        raise AppError("BLOCKED_URL", "URL 不允许嵌入凭据。", 400)
     host = (parsed.hostname or "").strip().lower()
     if not host or host in BLOCKED_HOSTS or host.endswith(".local") or host.endswith(".internal"):
         raise AppError("BLOCKED_HOST", "拒绝访问本地或保留主机。", 400)
@@ -50,8 +55,15 @@ def validate_public_url(url: str, resolver=socket.getaddrinfo) -> str:
         answers = resolver(host, None)
     except OSError as exc:
         raise AppError("BLOCKED_HOST", "无法解析该主机。", 400) from exc
+    allow_fake_ip = get_settings().allow_fake_ip_dns and get_settings().app_env.lower() == "development"
+    if not answers:
+        raise AppError("BLOCKED_HOST", "主机解析为空。", 400)
     for family, _type, _proto, _canon, sockaddr in answers:
         address = sockaddr[0]
+        if allow_fake_ip and ipaddress.ip_address(address) in FAKE_IP_NETWORK:
+            # Opt-in for a local fake-IP proxy. Only DNS answers are trusted; a literal
+            # 198.18.x.x host is still rejected above.
+            continue
         if _is_blocked_ip(address):
             raise AppError("BLOCKED_HOST", "拒绝访问环回、私有或保留地址。", 400)
     return host
@@ -67,6 +79,8 @@ class HttpFetcher:
         self._last_call: dict[str, float] = {}
 
     async def request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        billable_provider = kwargs.pop("billable_provider", None)
+        billable_source = kwargs.pop("billable_source", billable_provider)
         host = validate_public_url(url)
         headers = {"User-Agent": USER_AGENT, **kwargs.pop("headers", {})}
         timeout = kwargs.pop("timeout", self.timeout)
@@ -76,24 +90,42 @@ class HttpFetcher:
             if wait > 0:
                 await asyncio.sleep(wait)
             last_error: Exception | None = None
-            for attempt in range(self.retries + 1):
+            retries = 0 if billable_provider else self.retries
+            for attempt in range(retries + 1):
+                reservation = None
+                finalized = False
                 try:
-                    client = self._client or httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+                    from ..services.billing_gateway import reserve, finish, archive_response
+                    reservation = reserve(billable_provider, billable_source, endpoint=urlparse(url).path) if billable_provider else None
+                    from .transport import public_transport
+                    client = self._client or httpx.AsyncClient(timeout=timeout, follow_redirects=False, transport=public_transport(), trust_env=False)
                     close = self._client is None
                     try:
                         response = await client.request(method, url, headers=headers, timeout=timeout, **kwargs)
                     finally:
                         if close:
                             await client.aclose()
+                    if reservation:
+                        body_args = kwargs.get("json") or {}
+                        query = body_args.get("keyword") or body_args.get("query") or response.request.url.params.get("keyword") or response.request.url.params.get("query")
+                        archive_response(reservation, response, query)
+                        try:
+                            reported=response.json()
+                        except ValueError:
+                            reported=None
+                        finish(reservation,reported if isinstance(reported,dict) else None,ok=response.is_success)
+                        finalized = True
                     self._last_call[host] = loop.time()
-                    if response.status_code in {429, 500, 502, 503, 504} and attempt < self.retries:
+                    if response.status_code in {429, 500, 502, 503, 504} and attempt < retries:
                         await asyncio.sleep(0.4 * (attempt + 1))
                         continue
                     response.raise_for_status()
                     return response
                 except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+                    if reservation and not finalized:
+                        finish(reservation, ok=False)
                     last_error = exc
-                    if attempt >= self.retries:
+                    if attempt >= retries or (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code not in {429, 500, 502, 503, 504}):
                         raise
                     await asyncio.sleep(0.4 * (attempt + 1))
             raise last_error or RuntimeError("request failed")

@@ -19,6 +19,7 @@ class WebSearchCollector(SourceAdapter):
         payload = await fetcher.post_json(
             "https://api.firecrawl.dev/v1/search",
             {"query": query, "limit": 10},
+            billable_provider="firecrawl", billable_source=self.slug,
             headers={"Authorization": f"Bearer {key}"},
         )
         items: list[RawItem] = []

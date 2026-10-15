@@ -1,5 +1,6 @@
 node_modules/
 .next/
+.next-dev/
 backend/.venv/
 backend/.pytest_cache/
 __pycache__/
@@ -10,3 +11,9 @@ out/
 .DS_Store
 outputs/
 work/
+
+*.tsbuildinfo
+.venv/
+
+# Local visual QA receipts and captures
+.ui-design/

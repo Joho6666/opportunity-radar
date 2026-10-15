@@ -68,7 +68,7 @@ async def _llm_structured(prompt: str, schema_name: str) -> dict[str, Any] | Non
             return payload
         return None
     except Exception:
-        logger.exception("llm structured output failed", extra={"schema_name": schema_name})
+        logger.warning("llm structured output unavailable")
         usage = None
         return None
     finally:
@@ -93,15 +93,16 @@ async def analyze_profile(request: ProfileAnalyzeRequest) -> ProfileAnalysis:
 
 
 async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = None) -> list[QueryPlanItem]:
-    sources = radar.sources or ["mock"]
+    sources = radar.sources or ["hackernews"]
     if preference:
         sources = sorted(sources, key=lambda slug: preference.source_weights.get(slug, 0.0), reverse=True)
     prompt = f"为机会雷达生成搜索查询计划。目标：{radar.goal}；关键词：{radar.keywords}；地区：{radar.locations}；来源：{sources}。生成不超过 10 条查询，source 必须来自已选来源。"
-    payload = await _llm_structured(prompt, "queries: {{query: string, source: string, priority: number(0-100)}}[]，键名为 queries")
+    # Explicit keywords are authoritative and need no paid planning call.
+    payload = None if radar.keywords else await _llm_structured(prompt, "queries: {{query: string, source: string, priority: number(0-100)}}[]，键名为 queries")
     if payload is not None and isinstance(payload.get("queries"), list):
         try:
             queries = TypeAdapter(list[QueryPlanItem]).validate_python(payload["queries"])
-            queries = [item for item in queries if item.source in sources] or queries
+            queries = [item for item in queries if item.source in sources]
             if queries:
                 return queries[:10]
         except Exception:
@@ -117,6 +118,15 @@ async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = 
     output: list[QueryPlanItem] = []
     index = 0
     for source in sources:
+        if source != "mock":
+            # Respect the user's actual keywords/API operators/feed URL. Adding
+            # "线上 有偿" breaks RSS URLs and excludes implicit buyer requests.
+            for keyword in tokens:
+                output.append(QueryPlanItem(query=keyword, source=source, priority=max(70,92-index*3)))
+                index += 1
+                if len(output) >= 10:
+                    return output
+            continue
         for location in locations:
             for skill in tokens:
                 output.append(QueryPlanItem(query=f"{location} {skill} 有偿", source=source, priority=max(70, 92 - index * 3)))
@@ -133,27 +143,30 @@ async def analyze_raw_item(item: RawItem, profile_skills: list[str], has_commerc
     if payload is not None:
         try:
             analysis = TypeAdapter(OpportunityAnalysis).validate_python(payload)
+            from .evidence_facts import facts
+            source_facts = facts(f"{item.title} {item.content}")
+            analysis.budget_min = source_facts["budget_min"] or 0
+            analysis.budget_max = source_facts["budget_max"] or 0
+            analysis.conversion_probability = 0
             analysis.risk = min(100, analysis.risk + adjustment)
             analysis.warnings = list(dict.fromkeys([*analysis.warnings, *rule_warnings]))
             return analysis
         except Exception:
             pass
-    if not has_commercial_signal:
-        # Deterministic fallback must not fabricate opportunities: without any
-        # commercial/payment signal, the item is recorded but not scored as one.
-        return OpportunityAnalysis(is_opportunity=False, type="project", title=item.title, summary=item.content[:220], location="线上", work_mode="online", skills=[], budget_min=0, budget_max=0, estimated_hours=1, commercial_intent=0, skill_match=0, conversion_probability=0, urgency=0, competition=0, risk=min(100, adjustment), reasons=[], warnings=rule_warnings)
+    from .evidence_classifier import classify_tiktok
+    from .evidence_facts import facts
     text = f"{item.title} {item.content}"
-    lower = text.lower()
-    if "PPT" in text:
-        values = ("client", 200, 300, 3, 96, 82, 88, 45, 18, ["PPT"])
-    elif "实习" in text:
-        values = ("job", 4000, 6000, 80, 92, 70, 70, 55, 25, ["Python", "AI Agent", "n8n"])
-    elif "n8n" in lower:
-        values = ("project", 800, 1600, 12, 89, 65, 75, 50, 31, ["n8n", "自动化"])
-    else:
-        values = ("project", 1500, 3000, 30, 76, 55, 60, 55, 43, ["网站开发", "小程序"])
-    kind, min_budget, max_budget, hours, match, conversion, urgency, competition, risk, skills = values
-    return OpportunityAnalysis(is_opportunity=True, type=kind, title=item.title, summary=item.content[:220], location="桂林" if "桂林" in text else "远程", work_mode="online", skills=skills, budget_min=min_budget, budget_max=max_budget, estimated_hours=hours, commercial_intent=95, skill_match=match, conversion_probability=conversion, urgency=urgency, competition=competition, risk=min(100, risk + adjustment), reasons=["技能高度匹配", "发布时间较短", "预算合理", "交付难度可控"], warnings=rule_warnings or ["请确认需求范围与修改次数"])
+    classification = classify_tiktok(item.content, title=item.title)
+    extracted = facts(text)
+    skills = [skill for skill in profile_skills if skill.lower() in text.lower()]
+    return OpportunityAnalysis(is_opportunity=has_commercial_signal and classification.category == "buyer", type="client",
+        title=item.title, summary=item.content[:220], location="线上", work_mode="online", skills=skills,
+        budget_min=extracted["budget_min"] or 0, budget_max=extracted["budget_max"] or 0, estimated_hours=1,
+        commercial_intent=80 if classification.category == "buyer" else 0, skill_match=min(90, len(skills)*30),
+        conversion_probability=0, urgency=70 if classification.urgency_signal else 0, competition=50,
+        risk=min(100, adjustment), reasons=[classification.reason_code],
+        warnings=[*rule_warnings,"规则预测，仅供排序；工时、竞争程度及成交可能性待人工核实", *( ["预算未知"] if extracted["budget_min"] is None else [])])
+
 
 
 # ---- Phase 2: cheap-model calls (fast model preferred, None ⇒ rule fallbacks) ----
@@ -177,7 +190,7 @@ async def _llm_structured_fast(prompt: str, schema_name: str) -> dict[str, Any] 
         if isinstance(result, dict):
             payload = result
     except Exception:
-        logger.exception("llm fast call failed", extra={"schema_name": schema_name})
+        logger.warning("llm fast call unavailable")
         usage = None
     finally:
         _record_llm_call(schema_name, "openai-compatible", _fast_model(settings), int((time.perf_counter() - started) * 1000), payload is None, stage=schema_name, usage=usage)

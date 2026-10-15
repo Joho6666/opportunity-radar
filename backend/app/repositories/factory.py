@@ -7,12 +7,14 @@ from .postgres import PostgresRepository
 
 @lru_cache
 def get_repository_singleton():
+    from ..core.config import validate_runtime
+    validate_runtime()
     settings = get_settings()
     if settings.use_in_memory_store:
         return memory_singleton
     engine = create_database_engine()
     if engine is None:
-        return memory_singleton
+        raise RuntimeError("DATABASE_URL is required when USE_IN_MEMORY_STORE=false")
     return PostgresRepository(engine)
 
 

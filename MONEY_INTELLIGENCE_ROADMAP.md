@@ -1,5 +1,9 @@
 # MONEY_INTELLIGENCE_ROADMAP — 从机会发现 SaaS 到 Personal Money Intelligence OS
 
+> 2026-10-13 状态：本轮先完成计费闭合、持久化/身份保护、五类证据与人工获客闭环。本文中的 Sidecar、Verification Agent、SaaS 扩展等仍是目标，不能当作已交付功能。当前实现与限制以 CURRENT_ARCHITECTURE.md 和 docs/PRODUCTION_UPGRADE.md 为准。
+
+> TikHub 后续批次：累计费用保护、幂等请求、服务端搜索会话、脱敏响应回放和两组获客预设已实现。官方端点单价仍未核实，实际 TikHub 请求 0；真实需求产出和留出评测未完成。操作及限制见 [docs/TIKHUB_DEBUGGING.md](docs/TIKHUB_DEBUGGING.md)。
+
 > 依据：[CURRENT_ARCHITECTURE.md](./CURRENT_ARCHITECTURE.md)（Phase 0 审计）+ [docs/research/open-source-benchmark.md](./docs/research/open-source-benchmark.md)。
 > 产品目标：不是"爬更多数据"，而是每天回答一个问题——**"今天有什么变化值得赚钱？"**
 > 原则：抓取不是产品。发现别人还没注意到、但已出现真实需求和付费证据的变化，才是产品。

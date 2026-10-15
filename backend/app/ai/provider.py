@@ -16,7 +16,7 @@ class LLMProvider(ABC):
 
     async def embed(self, texts: list[str]) -> list[list[float]] | None:
         """None means embeddings unavailable; callers must degrade gracefully."""
-        return embedding_service.embed_texts_async(texts)
+        return await embedding_service.embed_texts_async(texts)
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -24,10 +24,17 @@ class OpenAICompatibleProvider(LLMProvider):
         settings = get_settings()
         if not settings.llm_api_key or not settings.llm_base_url:
             raise RuntimeError("LLM is not configured")
-        async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(f"{settings.llm_base_url.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {settings.llm_api_key}"}, json={"model": model or settings.llm_model, "messages": [{"role": "user", "content": prompt}], "response_format": {"type": "json_object"}})
-            response.raise_for_status()
-            payload = response.json()
+        from ..services.billing_gateway import reserve, finish
+        reservation = reserve("llm", schema_name[:80], len(prompt.encode("utf-8")) + settings.llm_max_output_tokens)
+        try:
+            async with httpx.AsyncClient(timeout=45) as client:
+                response = await client.post(f"{settings.llm_base_url.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {settings.llm_api_key}"}, json={"model": model or settings.llm_model, "messages": [{"role": "user", "content": prompt}], "max_tokens": settings.llm_max_output_tokens, "response_format": {"type": "json_object"}})
+                response.raise_for_status()
+                payload = response.json()
+            finish(reservation, payload)
+        except Exception:
+            finish(reservation, ok=False)
+            raise
         content = payload["choices"][0]["message"]["content"]
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else None
         parsed = json.loads(content)

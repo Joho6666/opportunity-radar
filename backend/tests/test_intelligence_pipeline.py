@@ -11,7 +11,7 @@ from app.services.radar_run_service import RadarRunService
 
 def test_mark_raw_tracks_seen_count_and_last_seen():
     repo = MemoryRepository()
-    radar = repo.create_radar("user-1", RadarCreate(name="R", goal="寻找 AI 视频商业机会", keywords=["AI"]))
+    radar = repo.create_radar("user-1", RadarCreate(sources=["mock"], name="R", goal="寻找 AI 视频商业机会", keywords=["AI"]))
     first = repo.mark_raw(radar.id, "https://example.com/a", None)
     row = repo.raw_row("https://example.com/a")
     assert row["seen_count"] == 1
@@ -26,7 +26,7 @@ def test_signals_linked_to_radar_and_raw_item():
     repo = MemoryRepository()
     user_id = "user-2"
     repo.save_profile(user_id, ProfileUpsert(display_name="测试", skills=[{"name": "PPT", "level": "strong"}], goals=["client"]))
-    radar = repo.create_radar(user_id, RadarCreate(name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
     repo.create_run(radar.id)
     run = asyncio.run(RadarRunService(repo).run(user_id, radar.id, repo.create_run(radar.id).id))
     assert run.status == "completed"
@@ -40,7 +40,7 @@ def test_run_records_stage_funnel():
     repo = MemoryRepository()
     user_id = "user-3"
     repo.save_profile(user_id, ProfileUpsert(display_name="测试", skills=[{"name": "PPT", "level": "strong"}], goals=["client"]))
-    radar = repo.create_radar(user_id, RadarCreate(name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
     run = asyncio.run(RadarRunService(repo).run(user_id, radar.id, repo.create_run(radar.id).id))
     stage = run.stage_stats
     assert stage["collected"] == 8  # 2 planned queries × 4 fixtures
@@ -55,7 +55,7 @@ def test_money_score_attached_to_created_opportunities():
     repo = MemoryRepository()
     user_id = "user-4"
     repo.save_profile(user_id, ProfileUpsert(display_name="测试", skills=[{"name": "PPT", "level": "strong"}], goals=["client"]))
-    radar = repo.create_radar(user_id, RadarCreate(name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
     asyncio.run(RadarRunService(repo).run(user_id, radar.id, repo.create_run(radar.id).id))
     opportunities = repo.list_opportunities(user_id)
     assert opportunities
@@ -70,7 +70,7 @@ def test_clusters_saved_via_run():
     repo = MemoryRepository()
     user_id = "user-5"
     repo.save_profile(user_id, ProfileUpsert(display_name="测试", skills=[{"name": "PPT", "level": "strong"}], goals=["client"]))
-    radar = repo.create_radar(user_id, RadarCreate(name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
+    radar = repo.create_radar(user_id, RadarCreate(sources=["mock"], name="R", goal="寻找桂林 PPT 有偿需求", keywords=["PPT"]))
     asyncio.run(RadarRunService(repo).run(user_id, radar.id, repo.create_run(radar.id).id))
     clusters = repo.list_clusters(user_id, radar_id=radar.id)
     assert clusters

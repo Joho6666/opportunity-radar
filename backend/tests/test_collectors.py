@@ -3,6 +3,7 @@ import pytest
 from app.collectors.base import SourceAdapter
 from app.collectors.github import GitHubCollector
 from app.collectors.hackernews import HackerNewsCollector
+from app.collectors.tikhub import TikHubCollector
 from app.collectors.http import validate_public_url
 from app.collectors.mock import MockCollector
 from app.collectors.registry import CollectorRegistry
@@ -53,6 +54,26 @@ def test_hackernews_collector_maps_raw_items(monkeypatch):
     assert items[0].title.startswith("Show HN")
 
 
+def test_tikhub_collector_maps_tiktok_search(monkeypatch):
+    class Settings:
+        tikhub_api_key = "test-token"
+        tikhub_base_url = "https://api.tikhub.io"
+
+    async def fake_json(url, **kwargs):
+        assert "keyword=AI" in url
+        assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+        return {"code": 200, "data": {"data": [{"item": {"id": "123", "desc": "AI video ad", "createTime": 1760000000, "author": {"uniqueId": "creator", "nickname": "Creator"}, "stats": {"diggCount": 4, "commentCount": 2, "playCount": 100}}}]}}
+
+    monkeypatch.setattr("app.collectors.tikhub.get_settings", lambda: Settings())
+    monkeypatch.setattr("app.collectors.tikhub.fetcher.get_json", fake_json)
+    items = asyncio.run(TikHubCollector().search("AI"))
+    assert len(items) == 1
+    assert items[0].source == "tikhub"
+    assert items[0].external_id == "123"
+    assert items[0].url == "https://www.tiktok.com/@creator/video/123"
+    assert items[0].engagement["plays"] == 100
+
+
 class BoomCollector(SourceAdapter):
     slug = "boom"
 
@@ -81,3 +102,28 @@ def test_plan_queries_uses_selected_sources():
     assert queries
     assert {item.source for item in queries} <= {"github", "hackernews"}
     assert "github" in {item.source for item in queries}
+
+
+def _fake_ip_resolver(host, port):
+    return [(2, 1, 6, "", ("198.18.0.97", 0))]
+
+
+def test_fake_ip_dns_answer_is_blocked_by_default(monkeypatch):
+    from app.collectors import http as http_mod
+    from app.core.config import Settings
+
+    monkeypatch.setattr(http_mod, "get_settings", lambda: Settings(allow_fake_ip_dns=False))
+    with pytest.raises(AppError):
+        validate_public_url("https://api.github.com/search", resolver=_fake_ip_resolver)
+
+
+def test_fake_ip_opt_in_trusts_dns_answers_but_not_literal_hosts(monkeypatch):
+    from app.collectors import http as http_mod
+    from app.core.config import Settings
+
+    monkeypatch.setattr(http_mod, "get_settings", lambda: Settings(allow_fake_ip_dns=True))
+    assert validate_public_url("https://api.github.com/search", resolver=_fake_ip_resolver) == "api.github.com"
+    with pytest.raises(AppError):
+        validate_public_url("http://198.18.0.97/secret", resolver=_fake_ip_resolver)
+    with pytest.raises(AppError):
+        validate_public_url("http://127.0.0.1/secret")

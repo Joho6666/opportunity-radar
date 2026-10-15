@@ -3,9 +3,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 OpportunityType = Literal["job", "client", "project", "business", "github"]
-OpportunityStatus = Literal["new", "saved", "contacted", "negotiating", "won", "lost", "ignored"]
+OpportunityStatus = Literal["new", "pending_verification", "verified", "ready_to_contact", "contacted", "replied", "quoted", "negotiating", "won", "lost", "saved", "ignored"]
 RadarStatus = Literal["active", "paused", "running", "error"]
-SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search"]
+SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search", "tikhub", "xiaohongshu", "weibo", "zhihu", "douyin"]
 
 
 class SkillInput(BaseModel):
@@ -42,8 +42,11 @@ class ProfileAnalysis(BaseModel):
 
 class QueryPlanItem(BaseModel):
     query: str
-    source: SourceSlug = "mock"
+    source: SourceSlug = "hackernews"
     priority: int = Field(ge=0, le=100)
+
+
+from .collection import CollectionPolicy
 
 
 class RadarCreate(BaseModel):
@@ -53,9 +56,10 @@ class RadarCreate(BaseModel):
     minimum_budget: int = Field(default=0, ge=0)
     frequency: str = "daily"
     freshness_hours: int = Field(default=72, ge=1, le=720)
+    collection_policy: CollectionPolicy = Field(default_factory=CollectionPolicy)
     keywords: list[str] = []
     locations: list[str] = []
-    sources: list[SourceSlug] = ["mock"]
+    sources: list[SourceSlug] = ["hackernews"]
     # Natural-language listener: e.g. "寻找正在抱怨短视频制作太慢、希望批量生产视频的商家"
     listener_description: str = Field(default="", max_length=2000)
 
@@ -156,11 +160,17 @@ class OpportunityRead(BaseModel):
     reasons: list[str] = []
     warnings: list[str] = []
     # Money Intelligence extensions (all optional so legacy payloads validate)
+    pipeline: dict = Field(default_factory=dict)
+    actual_revenue: int | None = None
+    actual_hours: float | None = None
+    closed_at: datetime | None = None
     money_score: int | None = None
     money_breakdown: dict | None = None
     information_edge: int | None = None
     information_edge_breakdown: dict | None = None
     verification_status: str = "unverified"
+    evidence_id: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class OpportunityAction(BaseModel):

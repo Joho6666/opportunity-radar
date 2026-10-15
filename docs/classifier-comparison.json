@@ -1,0 +1,273 @@
+{
+  "comparison": "Same synthetic corpus; baseline has only three classes. No paid model evaluated. Dataset used during rule development, so this is not held-out accuracy.",
+  "baseline_commit": "1d34837e0d98347c4a484f668eb88b3ba393b669",
+  "baseline": {
+    "dataset": "synthetic bilingual v1; not a live accuracy estimate",
+    "samples": 64,
+    "metrics": {
+      "buyer": {
+        "precision": 0.6957,
+        "recall": 1.0,
+        "f1": 0.8205,
+        "support": 16
+      },
+      "seller": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0,
+        "support": 12
+      },
+      "job": {
+        "precision": 0,
+        "recall": 0.0,
+        "f1": 0,
+        "support": 12
+      },
+      "content": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 12
+      },
+      "market": {
+        "precision": 0.4138,
+        "recall": 1.0,
+        "f1": 0.5854,
+        "support": 12
+      }
+    },
+    "confusion_matrix": {
+      "buyer": {
+        "buyer": 16,
+        "seller": 0,
+        "job": 0,
+        "content": 0,
+        "market": 0
+      },
+      "seller": {
+        "buyer": 1,
+        "seller": 0,
+        "job": 0,
+        "content": 0,
+        "market": 11
+      },
+      "job": {
+        "buyer": 6,
+        "seller": 0,
+        "job": 0,
+        "content": 0,
+        "market": 6
+      },
+      "content": {
+        "buyer": 0,
+        "seller": 0,
+        "job": 0,
+        "content": 12,
+        "market": 0
+      },
+      "market": {
+        "buyer": 0,
+        "seller": 0,
+        "job": 0,
+        "content": 0,
+        "market": 12
+      }
+    },
+    "errors": [
+      {
+        "id": "seller-1",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-2",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-3",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-4",
+        "expected": "seller",
+        "predicted": "buyer"
+      },
+      {
+        "id": "seller-5",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-6",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-7",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-8",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-9",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-10",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-11",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "seller-12",
+        "expected": "seller",
+        "predicted": "market"
+      },
+      {
+        "id": "job-1",
+        "expected": "job",
+        "predicted": "buyer"
+      },
+      {
+        "id": "job-2",
+        "expected": "job",
+        "predicted": "market"
+      },
+      {
+        "id": "job-3",
+        "expected": "job",
+        "predicted": "buyer"
+      },
+      {
+        "id": "job-4",
+        "expected": "job",
+        "predicted": "buyer"
+      },
+      {
+        "id": "job-5",
+        "expected": "job",
+        "predicted": "market"
+      },
+      {
+        "id": "job-6",
+        "expected": "job",
+        "predicted": "market"
+      },
+      {
+        "id": "job-7",
+        "expected": "job",
+        "predicted": "buyer"
+      },
+      {
+        "id": "job-8",
+        "expected": "job",
+        "predicted": "market"
+      },
+      {
+        "id": "job-9",
+        "expected": "job",
+        "predicted": "market"
+      },
+      {
+        "id": "job-10",
+        "expected": "job",
+        "predicted": "buyer"
+      },
+      {
+        "id": "job-11",
+        "expected": "job",
+        "predicted": "market"
+      },
+      {
+        "id": "job-12",
+        "expected": "job",
+        "predicted": "buyer"
+      }
+    ]
+  },
+  "current": {
+    "dataset": "synthetic bilingual v1; not a live accuracy estimate",
+    "samples": 64,
+    "metrics": {
+      "buyer": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 16
+      },
+      "seller": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 12
+      },
+      "job": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 12
+      },
+      "content": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 12
+      },
+      "market": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 12
+      }
+    },
+    "confusion_matrix": {
+      "buyer": {
+        "buyer": 16,
+        "seller": 0,
+        "job": 0,
+        "content": 0,
+        "market": 0
+      },
+      "seller": {
+        "buyer": 0,
+        "seller": 12,
+        "job": 0,
+        "content": 0,
+        "market": 0
+      },
+      "job": {
+        "buyer": 0,
+        "seller": 0,
+        "job": 12,
+        "content": 0,
+        "market": 0
+      },
+      "content": {
+        "buyer": 0,
+        "seller": 0,
+        "job": 0,
+        "content": 12,
+        "market": 0
+      },
+      "market": {
+        "buyer": 0,
+        "seller": 0,
+        "job": 0,
+        "content": 0,
+        "market": 12
+      }
+    },
+    "errors": []
+  }
+}

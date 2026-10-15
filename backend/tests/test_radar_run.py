@@ -56,5 +56,5 @@ def test_uncaught_run_error_keeps_error_code():
     result = asyncio.run(RadarRunService(repo, Broken([])).run(user_id, radar.id, run.id))
     assert result.status == "failed"
     assert result.error_code == "RADAR_RUN_FAILED"
-    assert "ValueError" in (result.error_message or "")
+    assert result.error_message and "boom" not in result.error_message
     assert repo.get_radar(user_id, radar.id).status == "error"

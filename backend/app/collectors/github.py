@@ -13,12 +13,22 @@ class GitHubCollector(SourceAdapter):
         return CollectorCapabilities(search=True, timeline=True, detail=True, change_detection=True)
 
     async def search(self, query: str) -> list[RawItem]:
+        items, next_cursor = await self.search_page(query)
+        for item in items: item.metadata["next_cursor"] = next_cursor
+        return items
+
+    async def search_page(self, query: str, cursor: str | None = None) -> tuple[list[RawItem], str | None]:
+        page = int(cursor or 1)
+        if not 1 <= page <= 100:
+            raise ValueError("Invalid page")
+        if query.startswith("issues:"):
+            return await self._issues(query.removeprefix("issues:").strip(), page)
         q = query.strip() or "AI agent stars:>20"
         token = get_settings().github_token
         headers = {"Accept": "application/vnd.github+json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        payload = await fetcher.get_json("https://api.github.com/search/repositories?" + urlencode({"q": q, "sort": "updated", "order": "desc", "per_page": 10}), headers=headers)
+        payload = await fetcher.get_json("https://api.github.com/search/repositories?" + urlencode({"q": q, "sort": "updated", "order": "desc", "per_page": 10, "page":page}), headers=headers)
         items: list[RawItem] = []
         for repo in payload.get("items", []):
             html_url = repo.get("html_url") or ""
@@ -55,7 +65,15 @@ class GitHubCollector(SourceAdapter):
                     },
                 )
             )
-        return items
+        return items, str(page + 1) if page * 10 < min(payload.get("total_count", 0), 1000) else None
+
+    async def _issues(self, query: str, page: int):
+        headers={"Accept":"application/vnd.github+json"}
+        if get_settings().github_token:
+            headers["Authorization"]=f"Bearer {get_settings().github_token}"
+        payload=await fetcher.get_json("https://api.github.com/search/issues?"+urlencode({"q":query+" is:issue is:open","sort":"updated","order":"desc","per_page":10,"page":page}),headers=headers)
+        items=[RawItem(external_id=str(row["id"]),title=row.get("title") or "",content=row.get("body") or row.get("title") or "",url=row["html_url"],author=(row.get("user") or {}).get("login"),source=self.slug,platform="github",published_at=_parse_dt(row.get("created_at")),updated_at_source=_parse_dt(row.get("updated_at")),metadata={"query":query,"content_kind":"issue","state":row.get("state"),"repository_url":row.get("repository_url")}) for row in payload.get("items",[]) if row.get("id") and row.get("html_url")]
+        return items,str(page+1) if page*10 < min(payload.get("total_count",0),1000) else None
 
 
 def _parse_dt(value: str | None) -> datetime | None:

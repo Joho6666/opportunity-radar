@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from .base import CollectorCapabilities, SourceAdapter
 from .http import fetcher, validate_public_url
+from .text import clean_text
 from ..core.config import get_settings
 from ..core.errors import AppError
 from ..schemas.domain import RawItem
@@ -26,12 +27,12 @@ class RssCollector(SourceAdapter):
                 validate_public_url(feed_url)
                 response = await fetcher.request("GET", feed_url)
             except AppError:
-                continue
+                raise
             parsed = feedparser.parse(response.text) if feedparser else {"entries": []}
             for entry in parsed.get("entries", [])[:10]:
                 url = entry.get("link") or feed_url
-                title = entry.get("title") or url
-                content = entry.get("summary") or entry.get("description") or title
+                title = clean_text(entry.get("title")) or url
+                content = clean_text(entry.get("summary") or entry.get("description")) or title
                 if query and query.lower() not in f"{title} {content}".lower() and not query.startswith("http"):
                     continue
                 items.append(
@@ -46,7 +47,7 @@ class RssCollector(SourceAdapter):
                         updated_at_source=_updated(entry),
                         platform="rss",
                         engagement={},
-                        metadata={"feed": feed_url, "query": query},
+                        metadata={"feed": feed_url, "query": query,"content_kind":"article"},
                     )
                 )
         return items
@@ -69,7 +70,7 @@ def _author(entry) -> str | None:
 
 
 def _published(entry) -> datetime | None:
-    value = entry.get("published") or entry.get("updated")
+    value = entry.get("published")
     if not value:
         return None
     try:

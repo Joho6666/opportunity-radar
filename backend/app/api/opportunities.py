@@ -20,8 +20,8 @@ async def list_opportunities(type: str | None = None, source: str | None = None,
 @router.get("/{opportunity_id}", response_model=OpportunityRead)
 async def get_opportunity(opportunity_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)): return repo.get_opportunity(user.id, opportunity_id)
 async def action(opportunity_id: str, new_status: str, payload: OpportunityAction, user: CurrentUser, repo: Repository) -> OpportunityRead:
-    item = repo.get_opportunity(user.id, opportunity_id); repo.record_action(opportunity_id, payload, action=new_status)
-    saved = repo.save_opportunity(item.model_copy(update={"status": new_status}))
+    from ..schemas.pipeline import PipelinePatch
+    saved = repo.update_pipeline(user.id,opportunity_id,PipelinePatch(status=new_status,**payload.model_dump(exclude_none=True,exclude={"closed_at"})))
     FeedbackService(repo).record_event(user.id, saved, new_status)
     return saved
 @router.post("/{opportunity_id}/save", response_model=OpportunityRead)

@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 def next_run_at(frequency: str, now: datetime) -> datetime | None:
+    if frequency not in {"hourly","daily","weekly"}:
+        return None
     if frequency == "hourly":
         return now + timedelta(hours=1)
     if frequency == "weekly":
@@ -58,6 +60,15 @@ def _hours_since(value: datetime | None, now: datetime) -> float | None:
     return max(0.0, (now - value).total_seconds() / 3600)
 
 
+def align_vectors_to_items(items, vectors, known_urls: set[str]):
+    """Keep each embedding paired with its original item after known-item filtering."""
+    if vectors is None:
+        return [(item, None) for item in items if item.url not in known_urls]
+    if len(vectors) != len(items):
+        raise ValueError("embedding count must match item count")
+    return [(item, vectors[index]) for index, item in enumerate(items) if item.url not in known_urls]
+
+
 def _looks_relevant(item, radar: RadarCreate) -> bool:
     """Stage 0.5 keyword gate: keep items that mention any radar keyword (or a
     significant goal token). Items matching nothing skip the expensive LLM call."""
@@ -76,8 +87,12 @@ class RadarRunService:
     async def run(self, user_id: str, radar_id: str, run_id: str):
         radar = self.repository.get_radar(user_id, radar_id)
         profile = self.repository.get_profile(user_id)
-        run = self.repository.get_run(user_id, run_id).model_copy(update={"status": "running"})
-        self.repository.save_run(run)
+        run = self.repository.claim_run(user_id, run_id)
+        if run is None:
+            return self.repository.get_run(user_id, run_id)
+        from .billing_gateway import paid_context
+        billing = paid_context(self.repository, user_id, radar.id, run.id, scheduled=run.stage_stats.get("trigger") == "scheduled")
+        billing.__enter__()
         token = bind_llm_context(repository=self.repository, user_id=user_id, radar_id=radar.id, run_id=run.id)
         try:
             preference = self.repository.get_preference(user_id)
@@ -93,17 +108,32 @@ class RadarRunService:
                 raw.extend(items)
                 if error:
                     collector_errors.append(error)
+            self.repository.record_collection(user_id,run.id,"radar",len(raw),0)
             stage = StageStats(collected=len(raw))
             unique, removed = deduplicate(raw)
             stage.after_dedup = len(unique)
             now = datetime.now(UTC)
-            cutoff = now - timedelta(hours=radar.freshness_hours)
-            timed = [item for item in unique if (stamp := activity_time(item)) is None or stamp >= cutoff]
+            from .collection_filter import filter_page
+            timed, policy_filtered = filter_page(unique, radar.collection_policy, freshness_hours=radar.freshness_hours, now=now)
             stage.after_freshness = len(timed)
             vectors = embed_texts([f"{item.title} {item.content}" for item in timed]) if timed else []
             if vectors is not None:
                 stage.embedding_calls = 1
-            fresh = [item for item in timed if not self.repository.has_raw(radar.id, item.url)]
+            known_urls = {item.url for item in timed if self.repository.has_raw(radar.id, item.url)}
+            fresh = [item for item in timed if item.url not in known_urls]
+            from .evidence_from_raw import raw_items_to_evidence_batch
+            from .semantic_classifier import enrich_batch
+            evidence_items = [item.model_copy(update={"metadata": {**item.metadata, "radar_id": radar.id, "collection_policy":radar.collection_policy.model_dump_json(),"collection_freshness_hours":str(radar.freshness_hours), "incremental_known": "true" if item.url in known_urls else "false"}}) for item in timed if len((item.content or item.title).strip()) >= 10]
+            evidence_by_url = {}
+            if evidence_items:
+                batch = raw_items_to_evidence_batch(source="", query=radar.name, items=evidence_items[:500], batch_id=run.id)
+                batch = await enrich_batch(batch)
+                stored = self.repository.upsert_evidence_batch(user_id, batch)
+                evidence_by_url = {str(record.url): record for record in stored.records}
+            for known_item in timed:
+                if known_item.url in known_urls:
+                    self.repository.mark_raw(radar.id,known_item.url,known_item)
+            aligned = align_vectors_to_items(timed, vectors, known_urls)
             stage.after_known = len(fresh)
             known = len(timed) - len(fresh)
             created = []
@@ -127,8 +157,7 @@ class RadarRunService:
             cluster_rep_text: dict[str, str] = {}
             trend_keywords: dict[str, int] = defaultdict(int)
             profile_skills = [skill.name for skill in profile.skills]
-            for index, item in enumerate(fresh):
-                vector = vectors[index] if vectors else None
+            for item, vector in aligned:
                 if vector is not None and self.repository.find_similar_raw(radar.id, vector) is not None:
                     # cross-run L4: this content (or a paraphrase) is already in history
                     semantic_removed += 1
@@ -139,7 +168,12 @@ class RadarRunService:
                     continue
                 item_signal = extract_signal(item)
                 positive_hits = 0
-                if listener_cfg is not None:
+                if radar.collection_policy.required_terms:
+                    # Explicit user gates have already passed filter_page. A
+                    # compiled natural-language token must not veto them (e.g.
+                    # the search keyword may be a feed URL, not a body term).
+                    positive_hits = sum(term.casefold() in f"{item.title} {item.content}".casefold() for term in radar.collection_policy.required_terms)
+                elif listener_cfg is not None:
                     # the listener IS the user's relevance definition; it replaces Stage 0.5
                     passes_listener, positive_hits = listener_matches(f"{item.title} {item.content}", listener_cfg)
                     if not passes_listener:
@@ -182,6 +216,9 @@ class RadarRunService:
                         cluster_payment[cluster_id] += 1
                     for keyword in stored.keywords[:3]:
                         trend_keywords[keyword] += 1
+                evidence = evidence_by_url.get(item.url) or evidence_by_url.get(item.url + "/")
+                if evidence and (evidence.category != "buyer" or not evidence.assessment["actionable_candidate"]):
+                    analysis.is_opportunity = False
                 if analysis.is_opportunity:
                     cluster = cluster_state.clusters[cluster_id]
                     platforms = cluster_platforms[cluster_id]
@@ -208,13 +245,17 @@ class RadarRunService:
                         personal_fit_boost=listener_boost(positive_hits),
                     )
                     score = calculate_score(analysis, radar.minimum_budget, preference=preference, source=item.source)
+                    from .acquisition_priority import priority
+                    ranking = priority(evidence,skills=profile_skills,minimum_budget=radar.minimum_budget,published_at=activity_time(item)) if evidence else None
                     hourly = round(analysis.budget_min / analysis.estimated_hours), round(analysis.budget_max / analysis.estimated_hours)
                     opportunity = OpportunityRead(
-                        id=str(uuid4()), radar_id=radar.id, type=analysis.type, title=analysis.title, summary=analysis.summary, source=item.source, source_url=item.url, published_at=item.published_at, location=analysis.location, work_mode=analysis.work_mode, budget_min=analysis.budget_min, budget_max=analysis.budget_max, estimated_hours=analysis.estimated_hours, estimated_hourly_rate=hourly, match_score=analysis.skill_match, opportunity_score=score.opportunity_score, conversion_probability=analysis.conversion_probability, risk_score=analysis.risk, recommendation=score.recommendation, status="new", skills=analysis.skills, reasons=analysis.reasons, warnings=analysis.warnings,
+                        id=str(uuid4()), radar_id=radar.id, evidence_id=evidence.evidence_id if evidence else None, type=analysis.type, title=analysis.title, summary=analysis.summary, source=item.source, source_url=item.url, published_at=item.published_at, location=analysis.location, work_mode=analysis.work_mode, budget_min=analysis.budget_min, budget_max=analysis.budget_max, estimated_hours=analysis.estimated_hours, estimated_hourly_rate=hourly, match_score=analysis.skill_match, opportunity_score=ranking["score"] if ranking else score.opportunity_score, conversion_probability=analysis.conversion_probability, risk_score=analysis.risk, recommendation=score.recommendation, status="new", skills=analysis.skills, reasons=[*analysis.reasons,*(ranking["reasons"] if ranking else [])], warnings=analysis.warnings,
+                        metadata={"score_kind": "prediction", "priority_breakdown": ranking, "budget_unknown": not analysis.budget_min and not analysis.budget_max, "hours_unknown": analysis.estimated_hours == 1, "currency": __import__("json").loads(evidence.metadata.get("facts","{}" )).get("currency") if evidence else None},
                         money_score=money.total, money_breakdown=money.model_dump(), information_edge=edge.total, information_edge_breakdown=edge.model_dump(), verification_status="unverified",
                     )
-                    self.repository.add_opportunity(opportunity, user_id=user_id)
-                    created.append(opportunity)
+                    saved_opportunity = self.repository.add_opportunity(opportunity, user_id=user_id)
+                    if saved_opportunity.id == opportunity.id:
+                        created.append(opportunity)
             cluster_list = finalize_clusters(cluster_state, platform_map=cluster_platforms, author_map=cluster_authors)
             for cluster in cluster_list:
                 velocity = cluster_velocity(cluster.document_count, 1.0)
@@ -265,18 +306,20 @@ class RadarRunService:
             finished_at = datetime.now(UTC)
             error_code = "COLLECTORS_FAILED" if collector_errors and not raw else None
             error_message = "; ".join(error["message"] for error in collector_errors)[:500] if collector_errors else None
-            run = run.model_copy(update={"status": "completed", "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": stage.model_dump()})
+            run = run.model_copy(update={"status": "completed", "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": {**run.stage_stats, **stage.model_dump(), "collection_filtered": policy_filtered}})
+            self.repository.record_collection(user_id,run.id,"radar",len(raw),len(evidence_by_url),removed+known+semantic_removed,policy_filtered["stale"])
             self.repository.save_run(run)
             self.repository.save_radar(radar.model_copy(update={"status": "active", "last_run_at": finished_at, "next_run_at": next_run_at(radar.frequency, finished_at), "stats": stats}))
             return run
         except Exception as exc:
-            logger.exception("radar run failed", extra={"radar_id": radar_id, "run_id": run_id, "error_code": "RADAR_RUN_FAILED"})
-            run = run.model_copy(update={"status": "failed", "error_code": "RADAR_RUN_FAILED", "error_message": f"{type(exc).__name__}: {exc}"[:500]})
+            logger.error("radar run failed", extra={"radar_id": radar_id, "run_id": run_id, "error_code": "RADAR_RUN_FAILED", "error_type":type(exc).__name__})
+            run = run.model_copy(update={"status": "failed", "error_code": "RADAR_RUN_FAILED", "error_message": "运行失败，请使用请求 ID 检查服务端日志。"})
             self.repository.save_run(run)
             self.repository.save_radar(radar.model_copy(update={"status": "error"}))
             return run
         finally:
             reset_llm_context(token)
+            billing.__exit__(None, None, None)
 
     def _cluster_threshold(self) -> float:
         from ..core.config import get_settings

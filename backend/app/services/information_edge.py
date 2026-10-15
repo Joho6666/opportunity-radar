@@ -88,7 +88,7 @@ def edge_from_pipeline(
     rarity_bonus: int = 0,
     weights: dict[str, float] | None = None,
 ) -> InformationEdgeBreakdown:
-    """Derive dimensions from cluster/pipeline facts."""
+    """Ranking heuristics from observed counts; not a calibrated advantage estimate."""
     from datetime import UTC, datetime
 
     freshness = 60
@@ -96,7 +96,7 @@ def edge_from_pipeline(
         age_hours = max(0.0, (datetime.now(UTC) - (published_at if published_at.tzinfo else published_at.replace(tzinfo=UTC))).total_seconds() / 3600)
         freshness = max(0, 100 - int(age_hours * 3))
     rarity = min(100, rarity_bonus + (40 if document_sources <= 2 else 15))
-    cross_source = min(100, document_sources * 25)
+    cross_source = min(100, document_sources * 25) if document_sources >= 2 else 0
     growth = max(0, min(100, int(demand_growth * 100)))
     supply_gap = max(0, 100 - competition)
     competition_awareness = min(100, competition)  # high competition = the crowd already knows

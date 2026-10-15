@@ -45,7 +45,12 @@ async def get_radar(radar_id: str, user: CurrentUser = Depends(get_current_user)
 async def put_radar(radar_id: str, value: RadarCreate, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     old = repo.get_radar(user.id, radar_id)
     value = await _with_listener_config(user.id, value, repo, radar_id=radar_id)
-    return repo.save_radar(old.model_copy(update=value.model_dump()))
+    changes = value.model_dump()
+    # model_copy does not validate nested dictionaries. Revalidate the policy,
+    # and invalidate cached query plans after the user's search input changes.
+    if any(getattr(old, key) != getattr(value, key) for key in ("goal", "keywords", "sources", "listener_description")):
+        changes["queries"] = []
+    return repo.save_radar(RadarRead.model_validate({**old.model_dump(), **changes}))
 
 
 @router.delete("/{radar_id}", status_code=204)
@@ -74,3 +79,14 @@ async def resume(radar_id: str, user: CurrentUser = Depends(get_current_user), r
 @router.get("/runs/{run_id}", response_model=RadarRunRead)
 async def get_run(run_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     return repo.get_run(user.id, run_id)
+
+
+from pydantic import BaseModel,Field
+
+class RunRecovery(BaseModel):
+    reason: str = Field(min_length=10,max_length=500)
+
+@router.post("/runs/{run_id}/recover",response_model=RadarRunRead)
+async def recover_run(run_id:str,payload:RunRecovery,user:CurrentUser=Depends(get_current_user),repo:Repository=Depends(get_repository)):
+    """Mark a stale run failed and pause its Radar; never retry paid calls automatically."""
+    return repo.recover_run(user.id,run_id,payload.reason)

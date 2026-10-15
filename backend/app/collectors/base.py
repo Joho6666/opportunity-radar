@@ -24,6 +24,12 @@ class SourceAdapter(ABC):
     @abstractmethod
     async def search(self, query: str) -> list[RawItem]: ...
 
+    async def search_page(self, query: str, cursor: str | None = None) -> tuple[list[RawItem], str | None]:
+        if cursor is not None:
+            from ..core.errors import AppError
+            raise AppError("PAGINATION_UNSUPPORTED", "此来源未验证游标分页。", 400)
+        return await self.search(query), None
+
     def capabilities(self) -> CollectorCapabilities:
         return CollectorCapabilities()
 

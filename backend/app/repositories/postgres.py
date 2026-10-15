@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
@@ -9,6 +9,8 @@ from ..core.config import get_settings
 from ..core.errors import AppError
 from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, QueryPlanItem, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem, SkillInput
 from ..schemas.intelligence import ChangeEventRead, EventClusterRead, SignalRead, SourceHealthRead, TrendSnapshotRead, TrendTopicRead
+from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult, EvidenceReview
+from ..services.evidence_ingest import normalize_evidence
 
 
 def vector_literal(vector: list[float]) -> str:
@@ -40,6 +42,8 @@ class PostgresRepository:
         exists = conn.execute(text("SELECT 1 FROM auth.users WHERE id = CAST(:id AS uuid)"), {"id": uid}).first()
         if exists:
             return uid
+        if get_settings().app_env.lower() in {"prod", "production"}:
+            raise AppError("USER_NOT_REGISTERED", "认证用户尚未注册。", 403)
         conn.execute(
             text(
                 "INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, confirmation_token, recovery_token, email_change_token_new, email_change, raw_app_meta_data, raw_user_meta_data) "
@@ -118,7 +122,7 @@ class PostgresRepository:
         with self._conn() as conn:
             conn.execute(
                 text(
-                    "UPDATE radars SET name=:name, description=:description, goal=:goal, status=CAST(:status AS radar_status), minimum_budget=:minimum_budget, frequency=:frequency, freshness_hours=:freshness_hours, last_run_at=:last_run_at, next_run_at=:next_run_at, last_stats=CAST(:last_stats AS jsonb), listener_description=:listener_description, listener_config=CAST(:listener_config AS jsonb), updated_at=NOW() WHERE id=CAST(:id AS uuid)"
+                    "UPDATE radars SET name=:name, description=:description, goal=:goal, status=CAST(:status AS radar_status), minimum_budget=:minimum_budget, frequency=:frequency, freshness_hours=:freshness_hours, collection_policy=CAST(:collection_policy AS jsonb), last_run_at=:last_run_at, next_run_at=:next_run_at, last_stats=CAST(:last_stats AS jsonb), listener_description=:listener_description, listener_config=CAST(:listener_config AS jsonb), updated_at=NOW() WHERE id=CAST(:id AS uuid)"
                 ),
                 {
                     "id": as_uuid(item.id),
@@ -129,6 +133,7 @@ class PostgresRepository:
                     "minimum_budget": item.minimum_budget,
                     "frequency": item.frequency,
                     "freshness_hours": item.freshness_hours,
+                    "collection_policy": item.collection_policy.model_dump_json(),
                     "last_run_at": item.last_run_at,
                     "next_run_at": item.next_run_at,
                     "last_stats": json.dumps(item.stats.model_dump()),
@@ -147,8 +152,8 @@ class PostgresRepository:
     def _insert_radar_row(self, conn: Connection, item: RadarRead) -> None:
         conn.execute(
             text(
-                "INSERT INTO radars (id, user_id, name, description, goal, status, minimum_budget, frequency, freshness_hours, last_run_at, next_run_at, last_stats, listener_description, listener_config) "
-                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), :name, :description, :goal, CAST(:status AS radar_status), :minimum_budget, :frequency, :freshness_hours, :last_run_at, :next_run_at, CAST(:last_stats AS jsonb), :listener_description, CAST(:listener_config AS jsonb))"
+                "INSERT INTO radars (id, user_id, name, description, goal, status, minimum_budget, frequency, freshness_hours, collection_policy, last_run_at, next_run_at, last_stats, listener_description, listener_config) "
+                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), :name, :description, :goal, CAST(:status AS radar_status), :minimum_budget, :frequency, :freshness_hours, CAST(:collection_policy AS jsonb), :last_run_at, :next_run_at, CAST(:last_stats AS jsonb), :listener_description, CAST(:listener_config AS jsonb))"
             ),
             {
                 "id": as_uuid(item.id),
@@ -160,6 +165,7 @@ class PostgresRepository:
                 "minimum_budget": item.minimum_budget,
                 "frequency": item.frequency,
                 "freshness_hours": item.freshness_hours,
+                "collection_policy": item.collection_policy.model_dump_json(),
                 "last_run_at": item.last_run_at,
                 "next_run_at": item.next_run_at,
                 "last_stats": json.dumps(item.stats.model_dump()),
@@ -203,9 +209,10 @@ class PostgresRepository:
         rid = str(row["id"])
         keywords = [item["keyword"] for item in conn.execute(text("SELECT keyword FROM radar_keywords WHERE radar_id=CAST(:rid AS uuid)"), {"rid": rid}).mappings()]
         locations = [item["location"] for item in conn.execute(text("SELECT location FROM radar_locations WHERE radar_id=CAST(:rid AS uuid)"), {"rid": rid}).mappings()]
-        allowed = {"mock", "public_web", "github", "hackernews", "rss", "web_search"}
+        from ..schemas.domain import SourceSlug
+        allowed = set(SourceSlug.__args__)
         sources = [item["slug"] for item in conn.execute(text("SELECT s.slug FROM radar_sources rs JOIN sources s ON s.id=rs.source_id WHERE rs.radar_id=CAST(:rid AS uuid)"), {"rid": rid}).mappings() if item["slug"] in allowed]
-        queries = [QueryPlanItem(query=item["query"], source=item["source"] if item["source"] in allowed else "mock", priority=item["priority"]) for item in conn.execute(text("SELECT query, source, priority FROM radar_queries WHERE radar_id=CAST(:rid AS uuid) ORDER BY priority DESC"), {"rid": rid}).mappings()]
+        queries = [QueryPlanItem(query=item["query"], source=item["source"], priority=item["priority"]) for item in conn.execute(text("SELECT query, source, priority FROM radar_queries WHERE radar_id=CAST(:rid AS uuid) ORDER BY priority DESC"), {"rid": rid}).mappings() if item["source"] in allowed]
         stats_raw = row["last_stats"] if "last_stats" in row.keys() else {}
         if isinstance(stats_raw, str):
             stats_raw = json.loads(stats_raw or "{}")
@@ -223,9 +230,10 @@ class PostgresRepository:
             "minimum_budget": row["minimum_budget"] or 0,
             "frequency": row["frequency"] or "daily",
             "freshness_hours": row["freshness_hours"] or 72,
+            "collection_policy": row["collection_policy"] if "collection_policy" in row.keys() else {},
             "keywords": keywords,
             "locations": locations,
-            "sources": sources or ["mock"],
+            "sources": sources,
             "queries": queries,
             "last_run_at": row["last_run_at"],
             "next_run_at": row["next_run_at"],
@@ -304,11 +312,35 @@ class PostgresRepository:
     def create_run(self, radar_id: str) -> RadarRunRead:
         run = RadarRunRead(id=str(uuid4()), radar_id=str(as_uuid(radar_id)), status="queued", stats=RadarRunStats())
         with self._conn() as conn:
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:rid,0))"), {"rid":as_uuid(radar_id)})
+            active=conn.execute(text("SELECT * FROM radar_runs WHERE radar_id=CAST(:rid AS uuid) AND status IN ('queued','running') ORDER BY started_at DESC LIMIT 1"), {"rid":as_uuid(radar_id)}).mappings().first()
+            if active:
+                return self._run_from_row(active)
             conn.execute(
                 text("INSERT INTO radar_runs (id, radar_id, status, query_count, items_found, items_deduplicated, items_analyzed, opportunities_found, matched_count, recommended_count) VALUES (CAST(:id AS uuid), CAST(:rid AS uuid), :status, 0, 0, 0, 0, 0, 0, 0)"),
                 {"id": run.id, "rid": as_uuid(radar_id), "status": run.status},
             )
         return run
+
+    def claim_run(self, user_id, run_id):
+        current=self.get_run(user_id,run_id)
+        with self._conn() as conn:
+            claimed=conn.execute(text("UPDATE radar_runs SET status='running',started_at=now() WHERE id=CAST(:id AS uuid) AND status='queued' RETURNING id"),{"id":as_uuid(run_id)}).first()
+        return self.get_run(user_id,run_id) if claimed else None
+
+    def recover_run(self, user_id, run_id, reason):
+        uid=as_uuid(user_id)
+        with self._conn() as conn:
+            row=conn.execute(text("SELECT rr.* FROM radar_runs rr JOIN radars r ON r.id=rr.radar_id WHERE rr.id=CAST(:id AS uuid) AND r.user_id=CAST(:uid AS uuid) FOR UPDATE OF rr"),{"id":as_uuid(run_id),"uid":uid}).mappings().first()
+            if row is None:
+                raise AppError("RUN_NOT_FOUND","未找到运行。",404)
+            if row["status"] not in {"running","queued"}:
+                return self._run_from_row(row)
+            if datetime.now(UTC)-row["started_at"] < timedelta(minutes=15):
+                raise AppError("RUN_STILL_ACTIVE","运行未超过15分钟，请等待。",409)
+            conn.execute(text("UPDATE radar_runs SET status='failed',finished_at=now(),error_code='MANUAL_RECOVERY',error_message=:reason WHERE id=CAST(:id AS uuid)"),{"id":as_uuid(run_id),"reason":reason})
+            conn.execute(text("UPDATE radars SET status='paused' WHERE id=:rid AND user_id=CAST(:uid AS uuid)"),{"rid":row["radar_id"],"uid":uid})
+        return self.get_run(user_id,run_id)
 
     def save_run(self, run: RadarRunRead) -> RadarRunRead:
         finished = datetime.now(UTC) if run.status in {"completed", "failed"} else None
@@ -359,6 +391,11 @@ class PostgresRepository:
                 if owner is None:
                     raise AppError("RADAR_NOT_FOUND", "未找到该机会雷达。", 404)
                 uid = str(owner[0])
+            if item.evidence_id:
+                conn.execute(text("SELECT id FROM evidence_items WHERE id=CAST(:eid AS uuid) AND user_id=CAST(:uid AS uuid) FOR UPDATE"), {"eid":item.evidence_id,"uid":uid})
+                existing=conn.execute(text("SELECT * FROM opportunities WHERE evidence_id=:eid AND user_id=CAST(:uid AS uuid)"), {"eid":item.evidence_id,"uid":uid}).mappings().first()
+                if existing:
+                    return self._opportunity_from_row(conn,existing)
             self._upsert_opportunity(conn, item, uid)
         return item
 
@@ -388,9 +425,9 @@ class PostgresRepository:
         hours = max(float(item.estimated_hours or 1), 1)
         conn.execute(
             text(
-                "INSERT INTO opportunities (id, user_id, radar_id, type, title, summary, source, source_url, published_at, location, work_mode, budget_min, budget_max, currency, estimated_hours, match_score, opportunity_score, conversion_probability, risk_score, recommendation, status, actual_revenue, actual_hours, closed_at, money_score, money_breakdown, information_edge, information_edge_breakdown, verification_status) "
-                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), CAST(:radar_id AS uuid), CAST(:type AS opportunity_type), :title, :summary, :source, :source_url, :published_at, :location, :work_mode, :budget_min, :budget_max, :currency, :estimated_hours, :match_score, :opportunity_score, :conversion_probability, :risk_score, :recommendation, CAST(:status AS opportunity_status), :actual_revenue, :actual_hours, :closed_at, :money_score, CAST(:money_breakdown AS jsonb), :information_edge, CAST(:information_edge_breakdown AS jsonb), :verification_status) "
-                "ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, status=EXCLUDED.status, match_score=EXCLUDED.match_score, opportunity_score=EXCLUDED.opportunity_score, conversion_probability=EXCLUDED.conversion_probability, risk_score=EXCLUDED.risk_score, recommendation=EXCLUDED.recommendation, actual_revenue=EXCLUDED.actual_revenue, actual_hours=EXCLUDED.actual_hours, closed_at=EXCLUDED.closed_at, money_score=EXCLUDED.money_score, money_breakdown=EXCLUDED.money_breakdown, information_edge=EXCLUDED.information_edge, information_edge_breakdown=EXCLUDED.information_edge_breakdown, verification_status=EXCLUDED.verification_status, updated_at=NOW()"
+                "INSERT INTO opportunities (id, user_id, radar_id, type, title, summary, source, source_url, published_at, location, work_mode, budget_min, budget_max, currency, estimated_hours, match_score, opportunity_score, conversion_probability, risk_score, recommendation, status, actual_revenue, actual_hours, closed_at, money_score, money_breakdown, information_edge, information_edge_breakdown, verification_status, evidence_id, metadata, pipeline_data) "
+                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), CAST(:radar_id AS uuid), CAST(:type AS opportunity_type), :title, :summary, :source, :source_url, :published_at, :location, :work_mode, :budget_min, :budget_max, :currency, :estimated_hours, :match_score, :opportunity_score, :conversion_probability, :risk_score, :recommendation, CAST(:status AS opportunity_status), :actual_revenue, :actual_hours, :closed_at, :money_score, CAST(:money_breakdown AS jsonb), :information_edge, CAST(:information_edge_breakdown AS jsonb), :verification_status, :evidence_id, CAST(:metadata AS jsonb), CAST(:pipeline_data AS jsonb)) "
+                "ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, status=EXCLUDED.status, match_score=EXCLUDED.match_score, opportunity_score=EXCLUDED.opportunity_score, conversion_probability=EXCLUDED.conversion_probability, risk_score=EXCLUDED.risk_score, recommendation=EXCLUDED.recommendation, actual_revenue=COALESCE(EXCLUDED.actual_revenue, opportunities.actual_revenue), actual_hours=COALESCE(EXCLUDED.actual_hours, opportunities.actual_hours), closed_at=COALESCE(EXCLUDED.closed_at, opportunities.closed_at), money_score=EXCLUDED.money_score, money_breakdown=EXCLUDED.money_breakdown, information_edge=EXCLUDED.information_edge, information_edge_breakdown=EXCLUDED.information_edge_breakdown, verification_status=EXCLUDED.verification_status, metadata=EXCLUDED.metadata, pipeline_data=EXCLUDED.pipeline_data, updated_at=NOW()"
             ),
             {
                 "id": as_uuid(item.id),
@@ -414,14 +451,17 @@ class PostgresRepository:
                 "risk_score": item.risk_score,
                 "recommendation": item.recommendation,
                 "status": item.status,
-                "actual_revenue": None,
-                "actual_hours": None,
-                "closed_at": None,
+                "actual_revenue": item.actual_revenue,
+                "actual_hours": item.actual_hours,
+                "closed_at": item.closed_at,
                 "money_score": item.money_score,
                 "money_breakdown": json.dumps(item.money_breakdown) if item.money_breakdown else None,
                 "information_edge": item.information_edge,
                 "information_edge_breakdown": json.dumps(item.information_edge_breakdown) if item.information_edge_breakdown else None,
                 "verification_status": item.verification_status,
+                "evidence_id": item.evidence_id,
+                "metadata": json.dumps(item.metadata),
+                "pipeline_data": json.dumps(item.pipeline),
             },
         )
         oid = as_uuid(item.id)
@@ -479,6 +519,10 @@ class PostgresRepository:
             information_edge=row["information_edge"] if "information_edge" in row.keys() else None,
             information_edge_breakdown=edge_breakdown,
             verification_status=row["verification_status"] if "verification_status" in row.keys() and row["verification_status"] else "unverified",
+            evidence_id=row["evidence_id"] if "evidence_id" in row.keys() else None,
+            pipeline=row.get("pipeline_data") or {},
+            actual_revenue=row["actual_revenue"], actual_hours=float(row["actual_hours"]) if row["actual_hours"] is not None else None, closed_at=row["closed_at"],
+            metadata=row["metadata"] if "metadata" in row.keys() and row["metadata"] else {},
         )
 
     def record_action(self, opportunity_id: str, payload: OpportunityAction, action: str | None = None) -> OpportunityAction:
@@ -505,6 +549,40 @@ class PostgresRepository:
             )
         return payload
 
+    def update_pipeline(self, user_id, opportunity_id, patch):
+        from ..services.acquisition_service import apply_pipeline
+        uid=as_uuid(user_id)
+        with self._conn() as conn:
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:uid,1138))"), {"uid":uid})
+            row=conn.execute(text("SELECT * FROM opportunities WHERE id=CAST(:oid AS uuid) AND user_id=CAST(:uid AS uuid) FOR UPDATE"), {"oid":as_uuid(opportunity_id),"uid":uid}).mappings().first()
+            if not row:
+                raise AppError("OPPORTUNITY_NOT_FOUND","未找到该机会。",404)
+            item=self._opportunity_from_row(conn,row)
+            evidence=None
+            if item.evidence_id:
+                evidence_row=conn.execute(text("SELECT * FROM evidence_items WHERE id=CAST(:eid AS uuid) AND user_id=CAST(:uid AS uuid) FOR SHARE"),{"eid":item.evidence_id,"uid":uid}).mappings().first()
+                if evidence_row:
+                    evidence=self._evidence_from_row(evidence_row)
+            updated=apply_pipeline(item,patch,evidence)
+            if updated == item:
+                return item
+            conn.execute(text("UPDATE opportunities SET status=CAST(:status AS opportunity_status),verification_status=:verification,pipeline_data=CAST(:pipeline AS jsonb),actual_revenue=:revenue,actual_hours=:hours,closed_at=:closed,updated_at=now() WHERE id=CAST(:oid AS uuid) AND user_id=CAST(:uid AS uuid)"),
+                         {"oid":item.id,"uid":uid,"status":updated.status,"verification":updated.verification_status,"pipeline":json.dumps(updated.pipeline),"revenue":updated.actual_revenue,"hours":updated.actual_hours,"closed":updated.closed_at})
+            conn.execute(text("INSERT INTO opportunity_actions(user_id,opportunity_id,action,metadata,actual_revenue,actual_hours,closed_at) VALUES(CAST(:uid AS uuid),CAST(:oid AS uuid),CAST(:status AS opportunity_status),CAST(:metadata AS jsonb),:revenue,:hours,:closed)"),
+                         {"uid":uid,"oid":item.id,"status":updated.status,"metadata":patch.model_dump_json(exclude_none=True),"revenue":patch.actual_revenue,"hours":patch.actual_hours,"closed":updated.closed_at})
+        return updated
+
+    def record_collection(self,user_id,receipt_id,source,fetched,effective,duplicates=0,stale=0):
+        with self._conn() as conn:
+            self._ensure_user(conn,user_id)
+            conn.execute(text("INSERT INTO collection_receipts(id,user_id,source,fetched,effective,duplicates,stale) VALUES(:id,CAST(:uid AS uuid),:source,:fetched,:effective,:duplicates,:stale) ON CONFLICT(id) DO UPDATE SET effective=EXCLUDED.effective,duplicates=EXCLUDED.duplicates,stale=EXCLUDED.stale WHERE collection_receipts.user_id=EXCLUDED.user_id"),{"id":receipt_id,"uid":as_uuid(user_id),"source":source,"fetched":fetched,"effective":effective,"duplicates":duplicates,"stale":stale})
+
+    def collection_counts(self,user_id):
+        with self._conn() as conn:
+            row=conn.execute(text("SELECT COALESCE(sum(fetched),0) collected,COALESCE(sum(fetched) FILTER(WHERE created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),0) today FROM collection_receipts WHERE user_id=CAST(:uid AS uuid)"),{"uid":as_uuid(user_id)}).mappings().one()
+            sources=conn.execute(text("SELECT source,sum(fetched) collected,sum(duplicates) duplicates,sum(stale) stale FROM collection_receipts WHERE user_id=CAST(:uid AS uuid) GROUP BY source"),{"uid":as_uuid(user_id)}).mappings().all()
+        return {**{key:int(value) for key,value in row.items()}, "sources":{entry["source"]:{key:int(entry[key]) for key in ("collected","duplicates","stale")} for entry in sources}}
+
     def scanned_count(self, user_id: str) -> int:
         with self._conn() as conn:
             value = conn.execute(text("SELECT COALESCE(SUM(rr.items_found), 0) FROM radar_runs rr JOIN radars r ON r.id=rr.radar_id WHERE r.user_id=CAST(:uid AS uuid)"), {"uid": as_uuid(user_id)}).scalar()
@@ -519,7 +597,7 @@ class PostgresRepository:
                     total += int(row["actual_revenue"])
                     continue
                 action = conn.execute(text("SELECT actual_revenue FROM opportunity_actions WHERE opportunity_id=CAST(:id AS uuid) AND actual_revenue IS NOT NULL ORDER BY created_at DESC LIMIT 1"), {"id": str(row["id"])}).first()
-                total += int(action[0]) if action and action[0] is not None else int(row["budget_max"] or 0)
+                total += int(action[0]) if action and action[0] is not None else 0
             return total
 
     def daily_brief(self, user_id: str) -> DailyBriefRead:
@@ -579,7 +657,7 @@ class PostgresRepository:
             rows = conn.execute(
                 text(
                     "SELECT r.user_id::text AS user_id, r.id::text AS radar_id FROM radars r "
-                    "WHERE r.status = 'active' AND (r.next_run_at IS NULL OR r.next_run_at <= :now) "
+                    "WHERE r.status = 'active' AND r.frequency IN ('hourly','daily','weekly') AND (r.next_run_at IS NULL OR r.next_run_at <= :now) "
                     "AND NOT EXISTS (SELECT 1 FROM radar_runs rr WHERE rr.radar_id = r.id AND rr.status IN ('queued', 'running'))"
                 ),
                 {"now": now},
@@ -630,6 +708,161 @@ class PostgresRepository:
         with self._conn() as conn:
             self._ensure_user(conn, user_id)
             store_event(conn, as_uuid(user_id), as_uuid(opportunity_id) if opportunity_id else None, event, metadata or {})
+
+    def _evidence_from_row(self, row) -> EvidenceRecord:
+        payload = dict(row)
+        payload["evidence_id"] = str(payload.pop("id"))
+        if payload.get("converted_opportunity_id") is not None:
+            payload["converted_opportunity_id"] = str(payload["converted_opportunity_id"])
+        payload.pop("user_id", None)
+        payload.pop("created_at", None)
+        return EvidenceRecord.model_validate(payload)
+
+    def upsert_evidence_batch(self, user_id: str, batch: EvidenceBatch) -> EvidenceUpsertResult:
+        records = normalize_evidence(batch)
+        inserted = 0
+        stored: list[EvidenceRecord] = []
+        with self._conn() as conn:
+            uid = self._ensure_user(conn, user_id)
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:uid,1138))"),{"uid":uid})
+            for record in records:
+                result = conn.execute(
+                    text(
+                        "INSERT INTO evidence_items "
+                        "(user_id, identity_key, batch_id, source, source_platform, acquisition_tool, url, external_id, raw_text, query, published_at, captured_at, category, buyer_type, problem, payment_signal, urgency_signal, metadata, evidence_grade, verification_status, classification_source, classification_reason, classification_confidence, notes) "
+                        "VALUES (CAST(:user_id AS uuid), :identity_key, :batch_id, :source, :source_platform, :acquisition_tool, :url, :external_id, :raw_text, :query, :published_at, :captured_at, :category, :buyer_type, :problem, :payment_signal, :urgency_signal, CAST(:metadata AS jsonb), :evidence_grade, :verification_status, :classification_source, :classification_reason, :classification_confidence, :notes) "
+                        "ON CONFLICT (user_id, identity_key) DO NOTHING RETURNING id"
+                    ),
+                    {
+                        "user_id": uid,
+                        "identity_key": record.identity_key,
+                        "batch_id": record.batch_id,
+                        "source": record.source,
+                        "source_platform": record.source_platform,
+                        "acquisition_tool": record.acquisition_tool,
+                        "url": str(record.url),
+                        "external_id": record.external_id,
+                        "raw_text": record.raw_text,
+                        "query": record.query,
+                        "published_at": record.published_at,
+                        "captured_at": record.captured_at,
+                        "category": record.category,
+                        "buyer_type": record.buyer_type,
+                        "problem": record.problem,
+                        "payment_signal": record.payment_signal,
+                        "urgency_signal": record.urgency_signal,
+                        "metadata": json.dumps(record.metadata),
+                        "evidence_grade": record.evidence_grade,
+                        "verification_status": record.verification_status,
+                        "classification_source": record.classification_source,
+                        "classification_reason": record.classification_reason,
+                        "classification_confidence": record.classification_confidence,
+                        "notes": record.notes,
+                    },
+                )
+                inserted_row = result.first() is not None
+                if inserted_row:
+                    inserted += 1
+                row = conn.execute(
+                    text("SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) AND identity_key=:identity_key FOR UPDATE"),
+                    {"user_id": uid, "identity_key": record.identity_key},
+                ).mappings().one()
+                current=self._evidence_from_row(row)
+                if current.raw_text != record.raw_text:
+                    conn.execute(text("INSERT INTO evidence_revisions(user_id,evidence_id,previous) VALUES(CAST(:uid AS uuid),CAST(:eid AS uuid),CAST(:previous AS jsonb))"),{"uid":uid,"eid":current.evidence_id,"previous":current.model_dump_json()})
+                    verification="disputed" if current.verification_status == "verified" else current.verification_status
+                    metadata={**current.metadata,**record.metadata,"latest_predicted_category":record.category,"needs_review":"true","source_updated_at":datetime.now(UTC).isoformat()}
+                    conn.execute(text("UPDATE evidence_items SET raw_text=:raw,metadata=CAST(:metadata AS jsonb),verification_status=:verification WHERE id=CAST(:eid AS uuid)"),{"eid":current.evidence_id,"raw":record.raw_text,"metadata":json.dumps(metadata),"verification":verification})
+                    conn.execute(text("UPDATE opportunities SET verification_status=:verification WHERE evidence_id=:eid AND user_id=CAST(:uid AS uuid)"),{"eid":current.evidence_id,"uid":uid,"verification":verification})
+                    current=current.model_copy(update={"raw_text":record.raw_text,"metadata":metadata,"verification_status":verification})
+                elif not inserted_row:
+                    from ..services.evidence_observations import refreshed_observation
+                    refreshed = refreshed_observation(current, record)
+                    if refreshed is not current:
+                        conn.execute(text("UPDATE evidence_items SET metadata=CAST(:metadata AS jsonb),published_at=:published WHERE id=CAST(:eid AS uuid)"),{"eid":current.evidence_id,"metadata":json.dumps(refreshed.metadata),"published":refreshed.published_at})
+                        current = refreshed
+                stored.append(current)
+        return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=len(batch.items) - inserted, records=stored)
+
+    def list_evidence(self, user_id: str, category: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
+        query = (
+            "SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) "
+            + ("AND category=:category " if category else "")
+            + "ORDER BY captured_at DESC LIMIT :limit"
+        )
+        with self._conn() as conn:
+            rows = conn.execute(
+                text(query),
+                {"user_id": as_uuid(user_id), "category": category, "limit": limit},
+            ).mappings().all()
+        return [self._evidence_from_row(row) for row in rows]
+
+    def get_evidence(self, user_id: str, evidence_id: str) -> EvidenceRecord:
+        with self._conn() as conn:
+            row = conn.execute(text("SELECT * FROM evidence_items WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {"id": as_uuid(evidence_id), "uid": as_uuid(user_id)}).mappings().first()
+        if row is None: raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+        return self._evidence_from_row(row)
+
+    def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
+        # One transaction with a row lock: concurrent conversions serialize, and the
+        # opportunity insert and evidence back-link commit (or roll back) together.
+        uid = as_uuid(user_id)
+        with self._conn() as conn:
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:uid,1138))"), {"uid":uid})
+            row = conn.execute(
+                text("SELECT * FROM evidence_items WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid) FOR UPDATE"),
+                {"id": evidence_id, "uid": uid},
+            ).mappings().first()
+            if row is None:
+                raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+            evidence = self._evidence_from_row(row)
+            from ..services.demand_qualification import require_actionable
+            require_actionable(evidence)
+            if evidence.verification_status != "verified" or evidence.category != "buyer":
+                raise AppError("EVIDENCE_NOT_ELIGIBLE", "证据必须已人工核实且为买方需求。", 409)
+            if evidence.converted_opportunity_id:
+                existing = conn.execute(
+                    text("SELECT * FROM opportunities WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"),
+                    {"id": evidence.converted_opportunity_id, "uid": uid},
+                ).mappings().first()
+            else:
+                # An opportunity left behind by an earlier half-finished conversion.
+                existing = conn.execute(
+                    text("SELECT * FROM opportunities WHERE user_id=CAST(:uid AS uuid) AND evidence_id=:eid"),
+                    {"uid": uid, "eid": evidence.evidence_id},
+                ).mappings().first()
+            if existing is not None:
+                saved = self._opportunity_from_row(conn, existing).model_copy(update={"verification_status":"verified"})
+                conn.execute(text("UPDATE opportunities SET verification_status='verified' WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {"id":saved.id,"uid":uid})
+            else:
+                self._ensure_user(conn, user_id)
+                self._upsert_opportunity(conn, item, uid)
+                saved = item
+            conn.execute(
+                text("UPDATE evidence_items SET converted_opportunity_id=CAST(:oid AS uuid) WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"),
+                {"oid": as_uuid(saved.id), "id": evidence_id, "uid": uid},
+            )
+        return saved
+
+    def review_evidence(self, user_id: str, evidence_id: str, review: EvidenceReview) -> EvidenceRecord:
+        uid = as_uuid(user_id)
+        with self._conn() as conn:
+            # Shared user lock gives conversion, review and pipeline the same lock order.
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:uid,1138))"), {"uid":uid})
+            row = conn.execute(text("SELECT * FROM evidence_items WHERE id=CAST(:eid AS uuid) AND user_id=CAST(:uid AS uuid) FOR UPDATE"), {"eid":as_uuid(evidence_id),"uid":uid}).mappings().first()
+            if row is None:
+                raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+            current = self._evidence_from_row(row)
+            from ..services.demand_qualification import review_updates
+            updated = review_updates(current, review)
+            metadata = updated.metadata
+            if updated == current:
+                return current
+            conn.execute(text("INSERT INTO evidence_reviews(user_id,evidence_id,previous,correction) VALUES(CAST(:uid AS uuid),CAST(:eid AS uuid),CAST(:previous AS jsonb),CAST(:correction AS jsonb))"), {"uid":uid,"eid":evidence_id,"previous":current.model_dump_json(),"correction":review.model_dump_json(exclude_none=True)})
+            conn.execute(text("UPDATE evidence_items SET verification_status=:verification,category=:category,notes=:notes,metadata=CAST(:metadata AS jsonb) WHERE id=CAST(:eid AS uuid) AND user_id=CAST(:uid AS uuid)"), {"uid":uid,"eid":evidence_id,"verification":updated.verification_status,"category":updated.category,"notes":updated.notes,"metadata":json.dumps(metadata)})
+            verification = updated.verification_status if updated.category == "buyer" else "disputed"
+            conn.execute(text("UPDATE opportunities SET verification_status=:verification,updated_at=now() WHERE evidence_id=:eid AND user_id=CAST(:uid AS uuid)"), {"verification":verification,"eid":evidence_id,"uid":uid})
+        return updated
 
     # ---- Money Intelligence extensions (Phase 1) ----
 
