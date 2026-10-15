@@ -45,7 +45,12 @@ async def get_radar(radar_id: str, user: CurrentUser = Depends(get_current_user)
 async def put_radar(radar_id: str, value: RadarCreate, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     old = repo.get_radar(user.id, radar_id)
     value = await _with_listener_config(user.id, value, repo, radar_id=radar_id)
-    return repo.save_radar(old.model_copy(update=value.model_dump()))
+    changes = value.model_dump()
+    # model_copy does not validate nested dictionaries. Revalidate the policy,
+    # and invalidate cached query plans after the user's search input changes.
+    if any(getattr(old, key) != getattr(value, key) for key in ("goal", "keywords", "sources", "listener_description")):
+        changes["queries"] = []
+    return repo.save_radar(RadarRead.model_validate({**old.model_dump(), **changes}))
 
 
 @router.delete("/{radar_id}", status_code=204)

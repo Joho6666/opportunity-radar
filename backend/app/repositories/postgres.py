@@ -122,7 +122,7 @@ class PostgresRepository:
         with self._conn() as conn:
             conn.execute(
                 text(
-                    "UPDATE radars SET name=:name, description=:description, goal=:goal, status=CAST(:status AS radar_status), minimum_budget=:minimum_budget, frequency=:frequency, freshness_hours=:freshness_hours, last_run_at=:last_run_at, next_run_at=:next_run_at, last_stats=CAST(:last_stats AS jsonb), listener_description=:listener_description, listener_config=CAST(:listener_config AS jsonb), updated_at=NOW() WHERE id=CAST(:id AS uuid)"
+                    "UPDATE radars SET name=:name, description=:description, goal=:goal, status=CAST(:status AS radar_status), minimum_budget=:minimum_budget, frequency=:frequency, freshness_hours=:freshness_hours, collection_policy=CAST(:collection_policy AS jsonb), last_run_at=:last_run_at, next_run_at=:next_run_at, last_stats=CAST(:last_stats AS jsonb), listener_description=:listener_description, listener_config=CAST(:listener_config AS jsonb), updated_at=NOW() WHERE id=CAST(:id AS uuid)"
                 ),
                 {
                     "id": as_uuid(item.id),
@@ -133,6 +133,7 @@ class PostgresRepository:
                     "minimum_budget": item.minimum_budget,
                     "frequency": item.frequency,
                     "freshness_hours": item.freshness_hours,
+                    "collection_policy": item.collection_policy.model_dump_json(),
                     "last_run_at": item.last_run_at,
                     "next_run_at": item.next_run_at,
                     "last_stats": json.dumps(item.stats.model_dump()),
@@ -151,8 +152,8 @@ class PostgresRepository:
     def _insert_radar_row(self, conn: Connection, item: RadarRead) -> None:
         conn.execute(
             text(
-                "INSERT INTO radars (id, user_id, name, description, goal, status, minimum_budget, frequency, freshness_hours, last_run_at, next_run_at, last_stats, listener_description, listener_config) "
-                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), :name, :description, :goal, CAST(:status AS radar_status), :minimum_budget, :frequency, :freshness_hours, :last_run_at, :next_run_at, CAST(:last_stats AS jsonb), :listener_description, CAST(:listener_config AS jsonb))"
+                "INSERT INTO radars (id, user_id, name, description, goal, status, minimum_budget, frequency, freshness_hours, collection_policy, last_run_at, next_run_at, last_stats, listener_description, listener_config) "
+                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), :name, :description, :goal, CAST(:status AS radar_status), :minimum_budget, :frequency, :freshness_hours, CAST(:collection_policy AS jsonb), :last_run_at, :next_run_at, CAST(:last_stats AS jsonb), :listener_description, CAST(:listener_config AS jsonb))"
             ),
             {
                 "id": as_uuid(item.id),
@@ -164,6 +165,7 @@ class PostgresRepository:
                 "minimum_budget": item.minimum_budget,
                 "frequency": item.frequency,
                 "freshness_hours": item.freshness_hours,
+                "collection_policy": item.collection_policy.model_dump_json(),
                 "last_run_at": item.last_run_at,
                 "next_run_at": item.next_run_at,
                 "last_stats": json.dumps(item.stats.model_dump()),
@@ -228,6 +230,7 @@ class PostgresRepository:
             "minimum_budget": row["minimum_budget"] or 0,
             "frequency": row["frequency"] or "daily",
             "freshness_hours": row["freshness_hours"] or 72,
+            "collection_policy": row["collection_policy"] if "collection_policy" in row.keys() else {},
             "keywords": keywords,
             "locations": locations,
             "sources": sources,
@@ -654,7 +657,7 @@ class PostgresRepository:
             rows = conn.execute(
                 text(
                     "SELECT r.user_id::text AS user_id, r.id::text AS radar_id FROM radars r "
-                    "WHERE r.status = 'active' AND (r.next_run_at IS NULL OR r.next_run_at <= :now) "
+                    "WHERE r.status = 'active' AND r.frequency IN ('hourly','daily','weekly') AND (r.next_run_at IS NULL OR r.next_run_at <= :now) "
                     "AND NOT EXISTS (SELECT 1 FROM radar_runs rr WHERE rr.radar_id = r.id AND rr.status IN ('queued', 'running'))"
                 ),
                 {"now": now},
@@ -757,10 +760,11 @@ class PostgresRepository:
                         "notes": record.notes,
                     },
                 )
-                if result.first() is not None:
+                inserted_row = result.first() is not None
+                if inserted_row:
                     inserted += 1
                 row = conn.execute(
-                    text("SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) AND identity_key=:identity_key"),
+                    text("SELECT * FROM evidence_items WHERE user_id=CAST(:user_id AS uuid) AND identity_key=:identity_key FOR UPDATE"),
                     {"user_id": uid, "identity_key": record.identity_key},
                 ).mappings().one()
                 current=self._evidence_from_row(row)
@@ -771,6 +775,12 @@ class PostgresRepository:
                     conn.execute(text("UPDATE evidence_items SET raw_text=:raw,metadata=CAST(:metadata AS jsonb),verification_status=:verification WHERE id=CAST(:eid AS uuid)"),{"eid":current.evidence_id,"raw":record.raw_text,"metadata":json.dumps(metadata),"verification":verification})
                     conn.execute(text("UPDATE opportunities SET verification_status=:verification WHERE evidence_id=:eid AND user_id=CAST(:uid AS uuid)"),{"eid":current.evidence_id,"uid":uid,"verification":verification})
                     current=current.model_copy(update={"raw_text":record.raw_text,"metadata":metadata,"verification_status":verification})
+                elif not inserted_row:
+                    from ..services.evidence_observations import refreshed_observation
+                    refreshed = refreshed_observation(current, record)
+                    if refreshed is not current:
+                        conn.execute(text("UPDATE evidence_items SET metadata=CAST(:metadata AS jsonb),published_at=:published WHERE id=CAST(:eid AS uuid)"),{"eid":current.evidence_id,"metadata":json.dumps(refreshed.metadata),"published":refreshed.published_at})
+                        current = refreshed
                 stored.append(current)
         return EvidenceUpsertResult(batch_id=batch.batch_id, inserted=inserted, duplicates=len(batch.items) - inserted, records=stored)
 

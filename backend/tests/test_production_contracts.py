@@ -33,6 +33,98 @@ def test_domestic_radar_survives_postgres_roundtrip(pg_repo):
     assert set(read.sources) == set(sources)
     assert set(q.source for q in read.queries) == set(sources)
 
+
+def test_collection_policy_persists_and_keyword_edits_invalidate_query_plan(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user, get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    uid=str(uuid4())
+    value=RadarCreate(name="配置持久化",goal="寻找公开的真实文档制作需求",sources=["rss"],keywords=["PPT"],collection_policy={"required_terms":["PPT"],"excluded_terms":["教程"],"time_basis":"published","include_unknown_dates":False,"sort":"hot","activity_filter":"discussion","min_interactions":3})
+    radar=pg_repo.create_radar(uid,value)
+    assert pg_repo.get_radar(uid,radar.id).collection_policy == value.collection_policy
+    pg_repo.save_radar(radar.model_copy(update={"queries":[QueryPlanItem(source="rss",query="old keyword",priority=50)]}))
+    monkeypatch.setitem(app.dependency_overrides,get_repository,lambda:pg_repo)
+    monkeypatch.setitem(app.dependency_overrides,get_current_user,lambda:CurrentUser(id=uid))
+    with TestClient(app) as client:
+        response=client.put("/api/radars/"+radar.id,json={**value.model_dump(),"keywords":["Word"],"freshness_hours":24})
+        assert response.status_code == 200
+    read=pg_repo.get_radar(uid,radar.id)
+    assert read.queries == [] and read.keywords == ["Word"]
+    assert read.freshness_hours == 24 and read.collection_policy == value.collection_policy
+
+
+def test_postgres_refreshes_public_counters_without_duplicate_lead(pg_repo):
+    from datetime import UTC,datetime
+    from app.schemas.domain import RawItem
+    from app.services.evidence_from_raw import raw_items_to_evidence_batch
+    uid=str(uuid4());now=datetime.now(UTC)
+    item=RawItem(external_id=uid,title="找人做PPT",content="找人做PPT，预算3000元",url="https://example.test/"+uid,source="rss",author="public-user",published_at=now,engagement={"comments":1})
+    first=pg_repo.upsert_evidence_batch(uid,raw_items_to_evidence_batch(source="rss",query="PPT",items=[item],batch_id="obs1"))
+    row=first.records[0]
+    pg_repo.review_evidence(uid,row.evidence_id,EvidenceReview(verification_status="verified",notes="人工核实"))
+    second=pg_repo.upsert_evidence_batch(uid,raw_items_to_evidence_batch(source="rss",query="PPT",items=[item.model_copy(update={"engagement":{"comments":40}})],batch_id="obs2"))
+    read=pg_repo.get_evidence(uid,row.evidence_id)
+    assert second.inserted == 0 and second.duplicates == 1
+    assert read.ranking["signals"]["comments"] == 40
+    assert read.notes == "人工核实" and read.verification_status == "verified" and read.captured_at == row.captured_at
+
+
+def test_postgres_manual_radar_never_becomes_due(pg_repo):
+    from datetime import UTC,datetime,timedelta
+    uid=str(uuid4())
+    radar=pg_repo.create_radar(uid,RadarCreate(name="手动",goal="寻找公开真实可核实的需求",frequency="manual"))
+    pg_repo.save_radar(radar.model_copy(update={"next_run_at":datetime.now(UTC)-timedelta(days=1)}))
+    assert (uid,radar.id) not in pg_repo.list_due_radars(datetime.now(UTC))
+
+
+def test_same_request_cannot_change_collection_filters(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user,get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    uid=str(uuid4());calls=[]
+    async def search(*args,**kwargs):
+        calls.append(1)
+        return [],None
+    monkeypatch.setattr(registry,"search",search)
+    monkeypatch.setitem(app.dependency_overrides,get_repository,lambda:pg_repo)
+    monkeypatch.setitem(app.dependency_overrides,get_current_user,lambda:CurrentUser(id=uid))
+    request={"request_id":str(uuid4()),"freshness_hours":24,"policy":{"sort":"hot"}}
+    with TestClient(app) as client:
+        first=client.post("/api/intelligence/evidence/collect?source=github&query=PPT",json=request)
+        replay=client.post("/api/intelligence/evidence/collect?source=github&query=PPT",json=request)
+        conflict=client.post("/api/intelligence/evidence/collect?source=github&query=PPT",json={**request,"freshness_hours":72})
+    assert first.status_code == replay.status_code == 200 and first.json() == replay.json()
+    assert conflict.status_code == 409 and calls == [1]
+
+
+def test_filtered_domestic_empty_page_keeps_cursor_bound_to_policy(pg_repo, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_current_user,get_repository
+    from app.core.security import CurrentUser
+    from app.main import app
+    from app.collectors.registry import registry
+    from app.services.billing_gateway import _context
+    uid=str(uuid4());calls=[]
+    async def search(*args,**kwargs):
+        calls.append(1)
+        _context.get()["next_cursor"]='{"position":2,"search_id":"s","search_session_id":"t"}'
+        return [],None
+    monkeypatch.setattr(registry,"search",search)
+    monkeypatch.setattr(get_settings(),"paid_api_enabled",True)
+    monkeypatch.setattr(get_settings(),"tikhub_api_key","offline-fixture")
+    monkeypatch.setitem(app.dependency_overrides,get_repository,lambda:pg_repo)
+    monkeypatch.setitem(app.dependency_overrides,get_current_user,lambda:CurrentUser(id=uid))
+    request={"manual_confirmed":True,"request_id":str(uuid4()),"freshness_hours":24,"policy":{"required_terms":["PPT"]}}
+    with TestClient(app) as client:
+        first=client.post("/api/intelligence/evidence/collect?source=xiaohongshu&query=PPT",json=request)
+        assert first.status_code == 200 and first.json()["next_cursor"]
+        changed={**request,"request_id":str(uuid4()),"cursor":first.json()["next_cursor"],"freshness_hours":72}
+        response=client.post("/api/intelligence/evidence/collect?source=xiaohongshu&query=PPT",json=changed)
+    assert response.status_code == 400 and calls == [1]
+
 def test_rls_denies_other_tenants_and_billing_writes(pg_repo):
     uid,other=str(uuid4()),str(uuid4())
     for user in (uid,other):pg_repo.get_profile(user)

@@ -97,11 +97,12 @@ async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = 
     if preference:
         sources = sorted(sources, key=lambda slug: preference.source_weights.get(slug, 0.0), reverse=True)
     prompt = f"为机会雷达生成搜索查询计划。目标：{radar.goal}；关键词：{radar.keywords}；地区：{radar.locations}；来源：{sources}。生成不超过 10 条查询，source 必须来自已选来源。"
-    payload = await _llm_structured(prompt, "queries: {{query: string, source: string, priority: number(0-100)}}[]，键名为 queries")
+    # Explicit keywords are authoritative and need no paid planning call.
+    payload = None if radar.keywords else await _llm_structured(prompt, "queries: {{query: string, source: string, priority: number(0-100)}}[]，键名为 queries")
     if payload is not None and isinstance(payload.get("queries"), list):
         try:
             queries = TypeAdapter(list[QueryPlanItem]).validate_python(payload["queries"])
-            queries = [item for item in queries if item.source in sources] or queries
+            queries = [item for item in queries if item.source in sources]
             if queries:
                 return queries[:10]
         except Exception:
@@ -117,6 +118,15 @@ async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = 
     output: list[QueryPlanItem] = []
     index = 0
     for source in sources:
+        if source != "mock":
+            # Respect the user's actual keywords/API operators/feed URL. Adding
+            # "线上 有偿" breaks RSS URLs and excludes implicit buyer requests.
+            for keyword in tokens:
+                output.append(QueryPlanItem(query=keyword, source=source, priority=max(70,92-index*3)))
+                index += 1
+                if len(output) >= 10:
+                    return output
+            continue
         for location in locations:
             for skill in tokens:
                 output.append(QueryPlanItem(query=f"{location} {skill} 有偿", source=source, priority=max(70, 92 - index * 3)))

@@ -270,7 +270,7 @@ class MemoryRepository:
         running = {run.radar_id for run in self.runs.values() if run.status in {"queued", "running"}}
         due: list[tuple[str, str]] = []
         for radar in self.radars.values():
-            if radar.status != "active" or radar.id in running:
+            if radar.status != "active" or radar.id in running or radar.frequency not in {"hourly","daily","weekly"}:
                 continue
             if radar.next_run_at is None or radar.next_run_at <= now:
                 due.append((radar.user_id, radar.id))
@@ -306,6 +306,9 @@ class MemoryRepository:
                 for oid, item in self.opportunities.items():
                     if item.evidence_id == current.evidence_id and item in self.list_opportunities(user_id):
                         self.opportunities[oid]=item.model_copy(update={"verification_status":verification})
+            else:
+                from ..services.evidence_observations import refreshed_observation
+                self.evidence[key] = refreshed_observation(self.evidence[key], record)
             stored.append(self.evidence[key])
         return EvidenceUpsertResult(
             batch_id=batch.batch_id,

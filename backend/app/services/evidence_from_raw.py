@@ -16,8 +16,8 @@ def raw_items_to_evidence_batch(*, source: str, query: str, items: list[RawItem]
         metadata = {str(key): str(value) for key, value in (item.metadata or {}).items() if value is not None}
         metadata["raw_author"] = item.author or ""
         metadata["raw_title"] = item.title or ""
-        metadata["engagement"] = str(item.engagement or {})
         import json
+        metadata["engagement"] = json.dumps(item.engagement or {}, ensure_ascii=False)
         from .evidence_facts import facts
         metadata["facts"] = json.dumps(facts(raw_text), ensure_ascii=False)
         metadata["content_kind"] = str(item.metadata.get("content_kind", "search_result"))

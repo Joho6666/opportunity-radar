@@ -86,6 +86,12 @@ class EvidenceRecord(BaseModel):
         from .demand_qualification import qualification
         return qualification(self.raw_text,self.metadata)
 
+    @computed_field
+    @property
+    def ranking(self) -> dict:
+        from .post_ranking import evidence_ranking
+        return evidence_ranking(self)
+
 
 class EvidenceUpsertResult(BaseModel):
     batch_id: str

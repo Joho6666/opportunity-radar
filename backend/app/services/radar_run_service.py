@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 def next_run_at(frequency: str, now: datetime) -> datetime | None:
+    if frequency not in {"hourly","daily","weekly"}:
+        return None
     if frequency == "hourly":
         return now + timedelta(hours=1)
     if frequency == "weekly":
@@ -111,8 +113,8 @@ class RadarRunService:
             unique, removed = deduplicate(raw)
             stage.after_dedup = len(unique)
             now = datetime.now(UTC)
-            cutoff = now - timedelta(hours=radar.freshness_hours)
-            timed = [item for item in unique if (stamp := activity_time(item)) is None or stamp >= cutoff]
+            from .collection_filter import filter_page
+            timed, policy_filtered = filter_page(unique, radar.collection_policy, freshness_hours=radar.freshness_hours, now=now)
             stage.after_freshness = len(timed)
             vectors = embed_texts([f"{item.title} {item.content}" for item in timed]) if timed else []
             if vectors is not None:
@@ -121,7 +123,7 @@ class RadarRunService:
             fresh = [item for item in timed if item.url not in known_urls]
             from .evidence_from_raw import raw_items_to_evidence_batch
             from .semantic_classifier import enrich_batch
-            evidence_items = [item.model_copy(update={"metadata": {**item.metadata, "radar_id": radar.id, "incremental_known": "true" if item.url in known_urls else "false"}}) for item in timed if len((item.content or item.title).strip()) >= 10]
+            evidence_items = [item.model_copy(update={"metadata": {**item.metadata, "radar_id": radar.id, "collection_policy":radar.collection_policy.model_dump_json(),"collection_freshness_hours":str(radar.freshness_hours), "incremental_known": "true" if item.url in known_urls else "false"}}) for item in timed if len((item.content or item.title).strip()) >= 10]
             evidence_by_url = {}
             if evidence_items:
                 batch = raw_items_to_evidence_batch(source="", query=radar.name, items=evidence_items[:500], batch_id=run.id)
@@ -166,7 +168,12 @@ class RadarRunService:
                     continue
                 item_signal = extract_signal(item)
                 positive_hits = 0
-                if listener_cfg is not None:
+                if radar.collection_policy.required_terms:
+                    # Explicit user gates have already passed filter_page. A
+                    # compiled natural-language token must not veto them (e.g.
+                    # the search keyword may be a feed URL, not a body term).
+                    positive_hits = sum(term.casefold() in f"{item.title} {item.content}".casefold() for term in radar.collection_policy.required_terms)
+                elif listener_cfg is not None:
                     # the listener IS the user's relevance definition; it replaces Stage 0.5
                     passes_listener, positive_hits = listener_matches(f"{item.title} {item.content}", listener_cfg)
                     if not passes_listener:
@@ -299,8 +306,8 @@ class RadarRunService:
             finished_at = datetime.now(UTC)
             error_code = "COLLECTORS_FAILED" if collector_errors and not raw else None
             error_message = "; ".join(error["message"] for error in collector_errors)[:500] if collector_errors else None
-            run = run.model_copy(update={"status": "completed", "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": {**run.stage_stats, **stage.model_dump()}})
-            self.repository.record_collection(user_id,run.id,"radar",len(raw),len(evidence_by_url),removed+known+semantic_removed,len(unique)-len(timed))
+            run = run.model_copy(update={"status": "completed", "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": {**run.stage_stats, **stage.model_dump(), "collection_filtered": policy_filtered}})
+            self.repository.record_collection(user_id,run.id,"radar",len(raw),len(evidence_by_url),removed+known+semantic_removed,policy_filtered["stale"])
             self.repository.save_run(run)
             self.repository.save_radar(radar.model_copy(update={"status": "active", "last_run_at": finished_at, "next_run_at": next_run_at(radar.frequency, finished_at), "stats": stats}))
             return run

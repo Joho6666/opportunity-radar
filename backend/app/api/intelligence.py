@@ -1,4 +1,3 @@
-from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
 
@@ -16,6 +15,7 @@ from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResu
 from ..schemas.domain import OpportunityRead
 from ..services.evidence_ingest import normalize_evidence
 from ..services.evidence_from_raw import raw_items_to_evidence_batch
+from ..schemas.collection import CollectionPolicy
 
 router = APIRouter(prefix="/api/intelligence", tags=["Intelligence"])
 
@@ -25,6 +25,9 @@ BILLABLE_SOURCES = TIKHUB_SOURCES | {"web_search"}
 
 
 class EvidenceCollectRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    freshness_hours: int | None = Field(default=None, ge=1, le=87600)
+    policy: CollectionPolicy = Field(default_factory=CollectionPolicy)
     cursor: str | None = Field(default=None,max_length=100)
     manual_confirmed: bool = False
     request_id: str | None = Field(default=None,min_length=8,max_length=100,pattern=r"^[A-Za-z0-9:_-]+$")
@@ -106,7 +109,7 @@ async def collect_evidence(
     if payload.billing_batch_id and payload.billing_batch_id != get_settings().paid_batch_id:
         raise AppError("PAID_BATCH_UNAUTHORIZED", "本轮批次标识不匹配。", 403)
     if payload.request_id:
-        fingerprint = hashlib.sha256(json.dumps([source, query.strip(), payload.cursor, max_age_days, get_settings().paid_batch_id]).encode()).hexdigest()
+        fingerprint = hashlib.sha256(json.dumps([source, query.strip(), payload.cursor, max_age_days, get_settings().paid_batch_id, payload.freshness_hours, payload.policy.model_dump()], sort_keys=True).encode()).hexdigest()
         cached = claim_request(repo, user.id, payload.request_id, fingerprint)
         if cached is not None:
             return cached
@@ -136,7 +139,10 @@ async def _collect_once(payload, source, query, max_age_days, user, repo):
     from ..services.billing_gateway import paid_context
     from ..services.collection_control import resolve_cursor, issue_cursor
     domestic = source in {"xiaohongshu", "douyin", "weibo", "zhihu"}
-    cursor = resolve_cursor(repo, user.id, source, query, payload.cursor) if domestic and payload.cursor else payload.cursor
+    # Bind domestic provider sessions to every filter as well as tenant/query.
+    import hashlib, json
+    session_query = query if payload.freshness_hours is None and max_age_days == 30 and payload.policy == CollectionPolicy() else query + "|" + hashlib.sha256(json.dumps([payload.freshness_hours,max_age_days,payload.policy.model_dump()],sort_keys=True).encode()).hexdigest()
+    cursor = resolve_cursor(repo, user.id, source, session_query, payload.cursor) if domestic and payload.cursor else payload.cursor
     with paid_context(repo, user.id, "evidence", collection_id) as context:
         if domestic or cursor is not None:
             items, provider_error = await registry.search(source, query, cursor=cursor, paged=True)
@@ -149,33 +155,33 @@ async def _collect_once(payload, source, query, max_age_days, user, repo):
                    else "数据源采集失败，请检查来源状态或保存的响应。")
         raise AppError(code, message, provider_error.get("status_code", 502))
     if domestic:
-        next_cursor = issue_cursor(repo, user.id, source, query, next_cursor)
+        next_cursor = issue_cursor(repo, user.id, source, session_query, next_cursor)
 
     accepted = []
     rejected = 0
-    stale = 0
-    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
-    for item in items:
+    from ..services.collection_filter import filter_page
+    filtered, filter_counts = filter_page(items, payload.policy, freshness_hours=payload.freshness_hours or max_age_days * 24)
+    stale = filter_counts["stale"]
+    for item in filtered:
         text = (item.content or item.title or "").strip()
         if len(text) < 10:
             rejected += 1
-            continue
-        # An old post is rarely still an open request (search often returns years-old threads).
-        dates = [value if value.tzinfo else value.replace(tzinfo=UTC) for value in (item.published_at, item.updated_at_source) if value]
-        if dates and max(dates) < cutoff:
-            stale += 1
             continue
         # Keep collector fields available to the evidence inbox without changing
         # the canonical raw text used for classification.
         metadata = dict(item.metadata or {})
         metadata.pop("next_cursor", None)
-        metadata["freshness"] = "known" if dates else "unknown"
+        from ..services.post_ranking import signals
+        observed=signals(published_at=item.published_at,updated_at=item.updated_at_source)
+        metadata["freshness"] = "known" if observed["published_at" if payload.policy.time_basis == "published" else "last_activity_at"] else "unknown"
+        metadata["collection_policy"] = payload.policy.model_dump_json()
+        metadata["collection_freshness_hours"] = str(payload.freshness_hours or max_age_days*24)
         metadata.update({"raw_title": item.title, "raw_author": item.author or "", "raw_source": item.source})
         accepted.append(item.model_copy(update={"metadata": metadata}))
 
     if not accepted:
         repo.record_collection(user.id,collection_id,source,len(items),0,stale=stale)
-        return {"batch_id": collection_id, "next_cursor": next_cursor, "billing_batch_id": get_settings().paid_batch_id or None, "request_id": payload.request_id, "fetched": len(items), "inserted": 0, "duplicates": 0, "rejected": rejected, "stale": stale, "records": [], "warning": "内存存储" if get_settings().use_in_memory_store else None}
+        return {"batch_id": collection_id, "next_cursor": next_cursor, "billing_batch_id": get_settings().paid_batch_id or None, "request_id": payload.request_id, "fetched": len(items), "inserted": 0, "duplicates": 0, "rejected": rejected, "stale": stale, "filtered": filter_counts, "records": [], "warning": "内存存储" if get_settings().use_in_memory_store else None}
 
     batch = raw_items_to_evidence_batch(
         source="tiktok" if source == "tikhub" else source,
@@ -199,6 +205,9 @@ async def _collect_once(payload, source, query, max_age_days, user, repo):
         "duplicates": result.duplicates,
         "rejected": rejected,
         "stale": stale,
+        "filtered": filter_counts,
+        "policy": payload.policy.model_dump(),
+        "ranking_scope": "collected_page",
         "records": result.records,
         "warning": "内存存储，重启后数据不会保留。" if get_settings().use_in_memory_store else None,
     }

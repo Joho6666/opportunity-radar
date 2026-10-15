@@ -46,6 +46,9 @@ class QueryPlanItem(BaseModel):
     priority: int = Field(ge=0, le=100)
 
 
+from .collection import CollectionPolicy
+
+
 class RadarCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = ""
@@ -53,6 +56,7 @@ class RadarCreate(BaseModel):
     minimum_budget: int = Field(default=0, ge=0)
     frequency: str = "daily"
     freshness_hours: int = Field(default=72, ge=1, le=720)
+    collection_policy: CollectionPolicy = Field(default_factory=CollectionPolicy)
     keywords: list[str] = []
     locations: list[str] = []
     sources: list[SourceSlug] = ["hackernews"]

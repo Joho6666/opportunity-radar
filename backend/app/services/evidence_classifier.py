@@ -84,6 +84,10 @@ def classify_tiktok(raw_text: str, *, title: str | None = None, engagement: dict
     if head and _SELLER.search(head) and not _ASK.search(head) and not _DEMAND.search(_SELLER.sub(" ", head)):
         return _SELLER_RESULT
     full = f"{head}\n{body}" if head and head not in body else body
+    # A generic SEO title such as "PPT外包需求" must not override an
+    # explicit first-person advertisement in the body.
+    if re.search(r"(?:接单|承接).{0,6}(?:私信我|联系我)", body) and not re.search(r"找人|寻找|求助|需要", head) and not _ASK.search(head):
+        return _SELLER_RESULT
     if _TEACH.search(full):
         return Classification(category="content", reason_code="audience_question_or_howto", confidence=0.72, evidence_grade="B")
     ask = _ASK.search(full)
