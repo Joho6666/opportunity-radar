@@ -34,10 +34,10 @@ export function reasonLabel(code: string | undefined): string {
 }
 
 export const STATUS_META: Record<ReviewStatus, { label: string; tone: string }> = {
-  unverified: { label: "待复核", tone: "border-amber-400/30 bg-amber-400/10 text-amber-200" },
-  verified: { label: "已核实", tone: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" },
-  invalidated: { label: "已排除", tone: "border-rose-400/30 bg-rose-400/10 text-rose-200" },
-  disputed: { label: "有争议", tone: "border-sky-400/30 bg-sky-400/10 text-sky-200" },
+  unverified: { label: "待复核", tone: "border-amber-400/30 bg-amber-400/10 text-amber-800" },
+  verified: { label: "已核实", tone: "border-emerald-400/30 bg-emerald-400/10 text-emerald-800" },
+  invalidated: { label: "已排除", tone: "border-rose-400/30 bg-rose-400/10 text-rose-700" },
+  disputed: { label: "有争议", tone: "border-sky-400/30 bg-sky-400/10 text-sky-800" },
 };
 
 export function statusOf(record: EvidenceRecord): ReviewStatus {
@@ -66,14 +66,14 @@ function matchesSearch(record: EvidenceRecord, search: string): boolean {
 
 /** `keep` pins one record (the one being converted) so a status change does not pull it out of view. */
 const PLATFORM_NAMES: Record<string, { label: string; tone: string }> = {
-  douyin: { label: "抖音", tone: "border-rose-400/40 bg-rose-400/10 text-rose-200" },
-  xiaohongshu: { label: "小红书", tone: "border-red-400/40 bg-red-400/10 text-red-200" },
-  weibo: { label: "微博", tone: "border-orange-400/40 bg-orange-400/10 text-orange-200" },
-  zhihu: { label: "知乎", tone: "border-sky-400/40 bg-sky-400/10 text-sky-200" },
-  tiktok: { label: "TikTok", tone: "border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-200" },
-  hackernews: { label: "Hacker News", tone: "border-amber-400/40 bg-amber-400/10 text-amber-200" },
-  github: { label: "GitHub", tone: "border-slate-400/40 bg-slate-400/10 text-slate-200" },
-  "v2ex.com": { label: "V2EX", tone: "border-emerald-400/40 bg-emerald-400/10 text-emerald-200" },
+  douyin: { label: "抖音", tone: "border-rose-400/40 bg-rose-400/10 text-rose-700" },
+  xiaohongshu: { label: "小红书", tone: "border-red-400/40 bg-red-400/10 text-red-700" },
+  weibo: { label: "微博", tone: "border-orange-400/40 bg-orange-400/10 text-orange-800" },
+  zhihu: { label: "知乎", tone: "border-sky-400/40 bg-sky-400/10 text-sky-800" },
+  tiktok: { label: "TikTok", tone: "border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-800" },
+  hackernews: { label: "Hacker News", tone: "border-amber-400/40 bg-amber-400/10 text-amber-800" },
+  github: { label: "GitHub", tone: "border-slate-400/40 bg-slate-400/10 text-slate-800" },
+  "v2ex.com": { label: "V2EX", tone: "border-emerald-400/40 bg-emerald-400/10 text-emerald-800" },
 };
 
 /** Where a post came from, by name. An RSS item is named after its site, not "rss". */
@@ -83,7 +83,7 @@ export function sourceOf(record: EvidenceRecord): { key: string; label: string; 
     try { key = new URL(record.url).hostname.replace(/^www\./, ""); } catch { key = "rss"; }
   }
   const known = PLATFORM_NAMES[key];
-  return { key, label: known?.label ?? (key === "rss" ? "RSS" : key), tone: known?.tone ?? "border-line bg-ink/60 text-slate-300" };
+  return { key, label: known?.label ?? (key === "rss" ? "RSS" : key), tone: known?.tone ?? "border-line bg-ink/60 text-slate-600" };
 }
 
 export function authorOf(record: EvidenceRecord): string | null {
