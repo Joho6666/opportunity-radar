@@ -24,6 +24,19 @@ def _is_direct_local_request(request: Request) -> bool:
 
 async def current_user(request: Request, authorization: str | None = Header(default=None)) -> CurrentUser:
     settings = get_settings()
+    if settings.app_env.lower() == "local":
+        if settings.auth_disabled or not settings.local_proxy_token:
+            raise AppError("LOCAL_AUTH_MISCONFIGURED", "本地认证配置无效。", 503)
+        if not _is_direct_local_request(request):
+            raise AppError("LOCAL_MODE_REMOTE_FORBIDDEN", "本机单用户模式只接受受信的本地代理请求。", 403)
+        expected_host = {f"127.0.0.1:{settings.local_api_port}"}
+        if request.headers.get("host", "").lower() not in expected_host:
+            raise AppError("LOCAL_HOST_REJECTED", "本地 API Host 不受信。", 403)
+        import hmac
+        supplied = request.headers.get("x-or-local-proxy", "")
+        if not hmac.compare_digest(supplied, settings.local_proxy_token):
+            raise AppError("LOCAL_PROXY_AUTH_REQUIRED", "请通过本机工作台访问。", 401)
+        return CurrentUser(id=str(UUID(settings.local_user_id)), email="local@opportunity-radar")
     if settings.auth_disabled:
         if settings.app_env.lower() in {"production", "prod"}:
             raise AppError("LOCAL_MODE_PRODUCTION_FORBIDDEN", "生产环境不能关闭身份认证。", 403)

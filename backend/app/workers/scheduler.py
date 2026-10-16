@@ -40,12 +40,26 @@ def scheduler_lock():
 
 async def tick(now: datetime | None = None) -> int:
     repo = get_repository_singleton()
-    due = repo.list_due_radars(now or datetime.now(UTC))
+    settings = get_settings()
+    local_mode = settings.app_env.lower() == "local"
+    if local_mode:
+        repo.interrupt_stale_runs(settings.local_user_id, stale_seconds=90)
+        for user_id, radar_id, run_id in repo.list_queued_runs(settings.local_user_id):
+            try:
+                await enqueue_radar_run(user_id, radar_id, run_id)
+            except Exception:
+                logger.warning("local queued run remains pending dispatch", extra={"radar_id": radar_id, "run_id": run_id})
+    due = repo.list_due_radars(now or datetime.now(UTC), local_user_id=settings.local_user_id if local_mode else None)
     queued = 0
     for user_id, radar_id in due:
         run = repo.create_run(radar_id)
         run = repo.save_run(run.model_copy(update={"stage_stats": {"trigger": "scheduled"}}))
-        await enqueue_radar_run(user_id, radar_id, run.id)
+        try:
+            await enqueue_radar_run(user_id, radar_id, run.id)
+        except Exception:
+            if not local_mode:
+                raise
+            logger.warning("local scheduled run remains pending dispatch", extra={"radar_id": radar_id, "run_id": run.id})
         queued += 1
     return queued
 
@@ -65,7 +79,7 @@ async def intelligence_tick(now: datetime | None = None) -> int:
     _last_snapshot_hour = hour
     saved = 0
     try:
-        topics = repo.list_trend_topics(limit=500)
+        topics = repo.list_trend_topics(user_id=get_settings().local_user_id if get_settings().app_env.lower() == "local" else None, limit=500)
         for topic in topics:
             snapshot = make_snapshot(topic, now=now)
             repo.save_trend_snapshot(snapshot)
@@ -87,7 +101,8 @@ async def maintenance_tick(now: datetime | None = None) -> dict[str, int]:
     result = {"clusters_merged": 0, "raw_items_removed": 0, "llm_calls_removed": 0}
     if _last_maintenance_day != today:
         _last_maintenance_day = today
-        result["clusters_merged"] = await run_maintenance(repo, repo.list_radar_pairs())
+        local_user_id = get_settings().local_user_id if get_settings().app_env.lower() == "local" else None
+        result["clusters_merged"] = await run_maintenance(repo, repo.list_radar_pairs(user_id=local_user_id))
     if _last_cleanup_day != today:
         _last_cleanup_day = today
         removed = await cleanup_expired(repo)
@@ -100,6 +115,8 @@ async def main() -> None:
     from ..core.logging import configure_logging
 
     configure_logging()
+    from ..core.config import validate_runtime
+    validate_runtime()
     while True:
         try:
             await asyncio.sleep(random.uniform(0, 10))  # jitter against replica thundering herds

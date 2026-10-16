@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Literal
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 OpportunityType = Literal["job", "client", "project", "business", "github"]
 OpportunityStatus = Literal["new", "pending_verification", "verified", "ready_to_contact", "contacted", "replied", "quoted", "negotiating", "won", "lost", "saved", "ignored"]
@@ -52,7 +52,8 @@ from .collection import CollectionPolicy
 class RadarCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = ""
-    goal: str = Field(min_length=10, max_length=2000)
+    goal: str = Field(min_length=1, max_length=2000)
+    mode: Literal["general", "acquisition"] = "acquisition"
     minimum_budget: int = Field(default=0, ge=0)
     frequency: str = "daily"
     freshness_hours: int = Field(default=72, ge=1, le=720)
@@ -60,8 +61,20 @@ class RadarCreate(BaseModel):
     keywords: list[str] = []
     locations: list[str] = []
     sources: list[SourceSlug] = ["hackernews"]
+    source_config: dict[str, str] = Field(default_factory=dict)
     # Natural-language listener: e.g. "寻找正在抱怨短视频制作太慢、希望批量生产视频的商家"
     listener_description: str = Field(default="", max_length=2000)
+    local_schedule_enabled: bool = False
+
+    @model_validator(mode="after")
+    def acquisition_goal_is_descriptive(self):
+        if self.mode == "acquisition" and len(self.goal.strip()) < 10:
+            raise ValueError("Acquisition Radar goal must contain at least 10 characters")
+        if self.mode == "general" and self.minimum_budget != 0:
+            raise ValueError("General monitoring does not use a minimum budget")
+        if any(len(key) > 80 or len(value) > 2048 for key, value in self.source_config.items()):
+            raise ValueError("Source configuration is too large")
+        return self
 
 
 class RadarRunStats(BaseModel):
@@ -94,6 +107,8 @@ class RadarRunRead(BaseModel):
     error_code: str | None = None
     collector_errors: list[dict] = Field(default_factory=list)
     stage_stats: dict = Field(default_factory=dict)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class RawItem(BaseModel):

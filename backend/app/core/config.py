@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = Field(default="", repr=False)
     auth_disabled: bool = False
     local_user_id: str = "00000000-0000-0000-0000-000000000001"
+    local_proxy_token: str = Field(default="", repr=False)
+    local_session_secret: str = Field(default="", repr=False)
+    local_api_port: int = Field(default=8015, ge=1024, le=65535)
     llm_base_url: str = ""
     llm_api_key: str = Field(default="", repr=False)
     llm_model: str = ""
@@ -76,6 +79,26 @@ def validate_runtime() -> None:
     """The same production gate applies to API, scheduler and workers."""
     import os
     settings = get_settings()
+    if settings.app_env.lower() == "local":
+        from uuid import UUID
+        from urllib.parse import urlsplit
+        db_host = urlsplit(settings.database_url).hostname if settings.database_url else None
+        redis_host = urlsplit(settings.redis_url).hostname if settings.redis_url else None
+        if settings.auth_disabled or settings.use_in_memory_store or not settings.database_url or not settings.redis_url:
+            raise RuntimeError("APP_ENV=local requires PostgreSQL and Redis; AUTH_DISABLED is forbidden")
+        if db_host not in {"127.0.0.1", "::1", "localhost"} or redis_host not in {"127.0.0.1", "::1", "localhost"}:
+            raise RuntimeError("APP_ENV=local requires loopback-only database and Redis endpoints")
+        if len(settings.local_proxy_token) < 64 or len(settings.local_session_secret) < 64:
+            raise RuntimeError("APP_ENV=local requires strong server-only local credentials")
+        try:
+            UUID(settings.local_user_id)
+        except ValueError as exc:
+            raise RuntimeError("APP_ENV=local requires a valid LOCAL_USER_ID UUID") from exc
+        if settings.paid_api_enabled or settings.enable_ai_classification or settings.local_classifier_mode != "off" or settings.allow_retention_delete:
+            raise RuntimeError("APP_ENV=local requires paid APIs, automatic AI, local model loading, and retention deletion to remain disabled")
+        if os.getenv("INCLUDE_MOCK_COLLECTOR", "false").strip().lower() not in {"false", "0", "no", "off", ""}:
+            raise RuntimeError("APP_ENV=local disallows mock collectors")
+        return
     if settings.app_env.lower() not in {"prod", "production"}:
         return
     if settings.auth_disabled or settings.use_in_memory_store or not settings.database_url or not settings.supabase_jwt_secret:

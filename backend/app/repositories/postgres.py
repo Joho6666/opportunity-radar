@@ -122,7 +122,7 @@ class PostgresRepository:
         with self._conn() as conn:
             conn.execute(
                 text(
-                    "UPDATE radars SET name=:name, description=:description, goal=:goal, status=CAST(:status AS radar_status), minimum_budget=:minimum_budget, frequency=:frequency, freshness_hours=:freshness_hours, collection_policy=CAST(:collection_policy AS jsonb), last_run_at=:last_run_at, next_run_at=:next_run_at, last_stats=CAST(:last_stats AS jsonb), listener_description=:listener_description, listener_config=CAST(:listener_config AS jsonb), updated_at=NOW() WHERE id=CAST(:id AS uuid)"
+                    "UPDATE radars SET name=:name, description=:description, goal=:goal, status=CAST(:status AS radar_status), minimum_budget=:minimum_budget, frequency=:frequency, freshness_hours=:freshness_hours, collection_policy=CAST(:collection_policy AS jsonb), last_run_at=:last_run_at, next_run_at=:next_run_at, last_stats=CAST(:last_stats AS jsonb), listener_description=:listener_description, listener_config=CAST(:listener_config AS jsonb), monitoring_mode=:mode, local_schedule_enabled=:local_schedule_enabled, source_config=CAST(:source_config AS jsonb), updated_at=NOW() WHERE id=CAST(:id AS uuid)"
                 ),
                 {
                     "id": as_uuid(item.id),
@@ -139,6 +139,9 @@ class PostgresRepository:
                     "last_stats": json.dumps(item.stats.model_dump()),
                     "listener_description": item.listener_description,
                     "listener_config": json.dumps(item.listener_config) if item.listener_config else None,
+                    "mode": item.mode,
+                    "local_schedule_enabled": item.local_schedule_enabled,
+                    "source_config": json.dumps(item.source_config),
                 },
             )
             self._replace_radar_children(conn, item)
@@ -152,8 +155,8 @@ class PostgresRepository:
     def _insert_radar_row(self, conn: Connection, item: RadarRead) -> None:
         conn.execute(
             text(
-                "INSERT INTO radars (id, user_id, name, description, goal, status, minimum_budget, frequency, freshness_hours, collection_policy, last_run_at, next_run_at, last_stats, listener_description, listener_config) "
-                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), :name, :description, :goal, CAST(:status AS radar_status), :minimum_budget, :frequency, :freshness_hours, CAST(:collection_policy AS jsonb), :last_run_at, :next_run_at, CAST(:last_stats AS jsonb), :listener_description, CAST(:listener_config AS jsonb))"
+                "INSERT INTO radars (id, user_id, name, description, goal, status, minimum_budget, frequency, freshness_hours, collection_policy, last_run_at, next_run_at, last_stats, listener_description, listener_config, monitoring_mode, local_schedule_enabled, source_config) "
+                "VALUES (CAST(:id AS uuid), CAST(:user_id AS uuid), :name, :description, :goal, CAST(:status AS radar_status), :minimum_budget, :frequency, :freshness_hours, CAST(:collection_policy AS jsonb), :last_run_at, :next_run_at, CAST(:last_stats AS jsonb), :listener_description, CAST(:listener_config AS jsonb), :mode, :local_schedule_enabled, CAST(:source_config AS jsonb))"
             ),
             {
                 "id": as_uuid(item.id),
@@ -171,6 +174,9 @@ class PostgresRepository:
                 "last_stats": json.dumps(item.stats.model_dump()),
                 "listener_description": item.listener_description,
                 "listener_config": json.dumps(item.listener_config) if item.listener_config else None,
+                "mode": item.mode,
+                "local_schedule_enabled": item.local_schedule_enabled,
+                "source_config": json.dumps(item.source_config),
             },
         )
 
@@ -220,12 +226,18 @@ class PostgresRepository:
         listener_config = row["listener_config"] if "listener_config" in row.keys() else None
         if isinstance(listener_config, str):
             listener_config = json.loads(listener_config) if listener_config else None
+        source_config = row["source_config"] if "source_config" in row.keys() else {}
+        if isinstance(source_config, str):
+            source_config = json.loads(source_config) if source_config else {}
         payload = {
             "id": rid,
             "user_id": str(row["user_id"]),
             "name": row["name"],
             "description": row["description"] or "",
             "goal": row["goal"],
+            "mode": row["monitoring_mode"] if "monitoring_mode" in row.keys() else "acquisition",
+            "local_schedule_enabled": row["local_schedule_enabled"] if "local_schedule_enabled" in row.keys() else False,
+            "source_config": source_config or {},
             "status": row["status"],
             "minimum_budget": row["minimum_budget"] or 0,
             "frequency": row["frequency"] or "daily",
@@ -325,7 +337,7 @@ class PostgresRepository:
     def claim_run(self, user_id, run_id):
         current=self.get_run(user_id,run_id)
         with self._conn() as conn:
-            claimed=conn.execute(text("UPDATE radar_runs SET status='running',started_at=now() WHERE id=CAST(:id AS uuid) AND status='queued' RETURNING id"),{"id":as_uuid(run_id)}).first()
+            claimed=conn.execute(text("UPDATE radar_runs SET status='running',started_at=now(),heartbeat_at=now() WHERE id=CAST(:id AS uuid) AND status='queued' RETURNING id"),{"id":as_uuid(run_id)}).first()
         return self.get_run(user_id,run_id) if claimed else None
 
     def recover_run(self, user_id, run_id, reason):
@@ -381,7 +393,7 @@ class PostgresRepository:
 
     def _run_from_row(self, row) -> RadarRunRead:
         stats = RadarRunStats(queries=row["query_count"] or 0, items_found=row["items_found"] or 0, duplicates_removed=row["items_deduplicated"] or 0, analyzed=row["items_analyzed"] or 0, opportunities_found=row["opportunities_found"] or 0, matched=row["matched_count"] or 0, recommended=row["recommended_count"] or 0)
-        return RadarRunRead(id=str(row["id"]), radar_id=str(row["radar_id"]), status=row["status"], stats=stats, error_message=row["error_message"], error_code=row["error_code"] if "error_code" in row.keys() else None)
+        return RadarRunRead(id=str(row["id"]), radar_id=str(row["radar_id"]), status=row["status"], stats=stats, error_message=row["error_message"], error_code=row["error_code"] if "error_code" in row.keys() else None, started_at=row["started_at"], finished_at=row["finished_at"], stage_stats={"heartbeat_at": row["heartbeat_at"].isoformat() if row.get("heartbeat_at") else None} if "heartbeat_at" in row.keys() else {})
 
     def add_opportunity(self, item: OpportunityRead, user_id: str | None = None) -> OpportunityRead:
         with self._conn() as conn:
@@ -652,22 +664,49 @@ class PostgresRepository:
             )
         return brief
 
-    def list_due_radars(self, now: datetime) -> list[tuple[str, str]]:
+    def list_due_radars(self, now: datetime, *, local_user_id: str | None = None) -> list[tuple[str, str]]:
         with self._conn() as conn:
             rows = conn.execute(
                 text(
                     "SELECT r.user_id::text AS user_id, r.id::text AS radar_id FROM radars r "
                     "WHERE r.status = 'active' AND r.frequency IN ('hourly','daily','weekly') AND (r.next_run_at IS NULL OR r.next_run_at <= :now) "
+                    "AND (CAST(:local_user_id AS uuid) IS NULL OR (r.user_id=CAST(:local_user_id AS uuid) AND r.local_schedule_enabled=TRUE)) "
                     "AND NOT EXISTS (SELECT 1 FROM radar_runs rr WHERE rr.radar_id = r.id AND rr.status IN ('queued', 'running'))"
                 ),
-                {"now": now},
+                {"now": now, "local_user_id": as_uuid(local_user_id) if local_user_id else None},
             ).mappings().all()
             return [(row["user_id"], row["radar_id"]) for row in rows]
 
-    def list_radar_pairs(self) -> list[tuple[str, str]]:
+    def list_radar_pairs(self, user_id: str | None = None) -> list[tuple[str, str]]:
         with self._conn() as conn:
-            rows = conn.execute(text("SELECT user_id::text AS user_id, id::text AS radar_id FROM radars")).mappings().all()
+            rows = conn.execute(text("SELECT user_id::text AS user_id, id::text AS radar_id FROM radars WHERE CAST(:uid AS uuid) IS NULL OR user_id=CAST(:uid AS uuid)"), {"uid": as_uuid(user_id) if user_id else None}).mappings().all()
             return [(row["user_id"], row["radar_id"]) for row in rows]
+
+    def list_queued_runs(self, user_id: str) -> list[tuple[str, str, str]]:
+        with self._conn() as conn:
+            rows = conn.execute(text("SELECT r.user_id::text AS user_id,r.id::text AS radar_id,rr.id::text AS run_id FROM radar_runs rr JOIN radars r ON r.id=rr.radar_id WHERE r.user_id=CAST(:uid AS uuid) AND rr.status='queued' ORDER BY rr.started_at NULLS FIRST LIMIT 100"), {"uid": as_uuid(user_id)}).mappings().all()
+        return [(row["user_id"], row["radar_id"], row["run_id"]) for row in rows]
+
+    def heartbeat_run(self, run_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(text("UPDATE radar_runs SET heartbeat_at=now() WHERE id=CAST(:id AS uuid) AND status='running'"), {"id": as_uuid(run_id)})
+
+    def interrupt_stale_runs(self, user_id: str, stale_seconds: int) -> int:
+        with self._conn() as conn:
+            result = conn.execute(text("WITH stale AS (UPDATE radar_runs rr SET status='failed',finished_at=now(),error_code='LOCAL_WORKER_INTERRUPTED',error_message='Worker heartbeat expired; no automatic rerun was made.' FROM radars r WHERE rr.radar_id=r.id AND r.user_id=CAST(:uid AS uuid) AND rr.status='running' AND COALESCE(rr.heartbeat_at,rr.started_at) < now() - (:seconds * interval '1 second') RETURNING rr.radar_id) UPDATE radars r SET status='error',next_run_at=NULL FROM stale WHERE r.id=stale.radar_id"), {"uid": as_uuid(user_id), "seconds": stale_seconds})
+            return result.rowcount or 0
+
+    def get_local_settings(self, user_id: str) -> str:
+        with self._conn() as conn:
+            row = conn.execute(text("SELECT ai_mode FROM local_settings WHERE user_id=CAST(:uid AS uuid)"), {"uid": as_uuid(user_id)}).first()
+        return row[0] if row else "off"
+
+    def save_local_settings(self, user_id: str, ai_mode: str) -> str:
+        if ai_mode not in {"off", "on_demand"}:
+            raise AppError("INVALID_AI_MODE", "AI 模式无效。", 422)
+        with self._conn() as conn:
+            conn.execute(text("INSERT INTO local_settings(user_id,ai_mode) VALUES(CAST(:uid AS uuid),:mode) ON CONFLICT(user_id) DO UPDATE SET ai_mode=EXCLUDED.ai_mode,updated_at=now()"), {"uid": as_uuid(user_id), "mode": ai_mode})
+        return ai_mode
 
     def record_llm_call(self, user_id: str | None, radar_id: str | None, run_id: str | None, provider: str | None, model: str, latency_ms: int, fallbacked: bool, schema_name: str, stage: str | None = None, input_count: int | None = None, output_count: int | None = None, prompt_tokens: int | None = None, completion_tokens: int | None = None, cost_usd: float | None = None) -> None:
         with self._conn() as conn:
@@ -797,11 +836,64 @@ class PostgresRepository:
             ).mappings().all()
         return [self._evidence_from_row(row) for row in rows]
 
+    def list_intelligence_feed(self, user_id: str, *, radar_id: str | None = None, category: str | None = None, source: str | None = None, query: str = "", saved: bool | None = None, unread: bool | None = None, cursor_at=None, cursor_id: str | None = None, cursor_order: str = "recent", cursor_score: int | None = None, cursor_saved: bool | None = None, limit: int = 30, order: str = "recent") -> list[EvidenceRecord]:
+        filters = ["e.user_id=CAST(:user_id AS uuid)"]
+        params = {"user_id": as_uuid(user_id), "radar_id": as_uuid(radar_id) if radar_id else None, "category": category, "source": source, "query": f"%{query}%", "saved": saved, "is_read": not unread if unread is not None else None, "cursor_at": cursor_at, "cursor_id": as_uuid(cursor_id) if cursor_id else None, "cursor_score": cursor_score or 0, "cursor_saved": bool(cursor_saved), "limit": limit}
+        if radar_id: filters.append("re.radar_id=CAST(:radar_id AS uuid)")
+        if category: filters.append("e.category=:category")
+        if source: filters.append("e.source=:source")
+        if query: filters.append("(e.raw_text ILIKE :query OR e.url ILIKE :query OR e.query ILIKE :query)")
+        if saved is not None: filters.append("e.is_saved=:saved")
+        if unread is not None: filters.append("e.is_read=:is_read")
+        if cursor_at is not None and cursor_id and cursor_order != order:
+            raise AppError("INVALID_CURSOR", "收件箱游标与当前排序不匹配，请刷新列表。", 400)
+        if cursor_at is not None and cursor_id and order == "relevance":
+            cursor_filter = "HAVING (COALESCE(MAX(re.relevance_score),0),e.captured_at,e.id)<(:cursor_score,:cursor_at,CAST(:cursor_id AS uuid))"
+        elif cursor_at is not None and cursor_id and order == "saved":
+            cursor_filter = "HAVING (e.is_saved,e.captured_at,e.id)<(:cursor_saved,:cursor_at,CAST(:cursor_id AS uuid))"
+        elif cursor_at is not None and cursor_id:
+            cursor_filter = "HAVING (e.captured_at,e.id)<(:cursor_at,CAST(:cursor_id AS uuid))"
+        else:
+            cursor_filter = ""
+        order_by = "max(re.relevance_score) DESC, e.captured_at DESC, e.id DESC" if order == "relevance" else "e.is_saved DESC, e.captured_at DESC, e.id DESC" if order == "saved" else "e.captured_at DESC, e.id DESC"
+        sql = f"SELECT e.*, COALESCE(jsonb_agg(jsonb_build_object('radar_id',r.id::text,'name',r.name,'mode',r.monitoring_mode,'relevance_score',re.relevance_score,'relevance_reasons',re.relevance_reasons,'ranking',re.relevance_breakdown,'discovered_at',re.discovered_at) ORDER BY re.relevance_score DESC NULLS LAST) FILTER (WHERE r.id IS NOT NULL),'[]'::jsonb) AS radar_matches FROM evidence_items e LEFT JOIN radar_evidence re ON re.evidence_id=e.id AND re.user_id=e.user_id LEFT JOIN radars r ON r.id=re.radar_id AND r.user_id=re.user_id WHERE " + " AND ".join(filters) + f" GROUP BY e.id {cursor_filter} ORDER BY {order_by} LIMIT :limit"
+        with self._conn() as conn:
+            rows = conn.execute(text(sql), params).mappings().all()
+        records = []
+        for row in rows:
+            record = self._evidence_from_row(row)
+            matches = row["radar_matches"] if isinstance(row["radar_matches"], list) else json.loads(row["radar_matches"] or "[]")
+            ranking = (matches[0].get("ranking") or {"score": matches[0].get("relevance_score"), "reasons": matches[0].get("relevance_reasons", [])}) if matches else None
+            records.append(record.model_copy(update={"radars": matches, "intelligence_ranking": ranking}))
+        return records
+
+    def update_evidence_state(self, user_id: str, evidence_id: str, *, saved: bool | None = None, read: bool | None = None) -> EvidenceRecord:
+        uid = as_uuid(user_id)
+        with self._conn() as conn:
+            row = conn.execute(text("SELECT id FROM evidence_items WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid) FOR UPDATE"), {"id": as_uuid(evidence_id), "uid": uid}).first()
+            if row is None:
+                raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
+            if saved is not None:
+                conn.execute(text("UPDATE evidence_items SET is_saved=:value WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {"value": saved, "id": as_uuid(evidence_id), "uid": uid})
+            if read is not None:
+                conn.execute(text("UPDATE evidence_items SET is_read=:value WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {"value": read, "id": as_uuid(evidence_id), "uid": uid})
+        return self.get_evidence(user_id, evidence_id)
+
+    def link_evidence_to_radar(self, user_id: str, radar_id: str, evidence_id: str, run_id: str | None, score: int, reasons: list[str], ranking: dict | None = None) -> None:
+        with self._conn() as conn:
+            conn.execute(text("INSERT INTO radar_evidence(user_id,radar_id,evidence_id,run_id,relevance_score,relevance_reasons,relevance_breakdown) SELECT CAST(:uid AS uuid),r.id,e.id,CAST(:run AS uuid),:score,CAST(:reasons AS jsonb),CAST(:ranking AS jsonb) FROM radars r JOIN evidence_items e ON e.user_id=r.user_id WHERE r.id=CAST(:rid AS uuid) AND r.user_id=CAST(:uid AS uuid) AND e.id=CAST(:eid AS uuid) ON CONFLICT (radar_id,evidence_id) DO UPDATE SET run_id=EXCLUDED.run_id, relevance_score=EXCLUDED.relevance_score, relevance_reasons=EXCLUDED.relevance_reasons, relevance_breakdown=EXCLUDED.relevance_breakdown"), {"uid": as_uuid(user_id), "rid": as_uuid(radar_id), "eid": as_uuid(evidence_id), "run": as_uuid(run_id) if run_id else None, "score": max(0, min(100, int(score))), "reasons": json.dumps(reasons, ensure_ascii=False), "ranking": json.dumps(ranking or {}, ensure_ascii=False)})
+
     def get_evidence(self, user_id: str, evidence_id: str) -> EvidenceRecord:
         with self._conn() as conn:
             row = conn.execute(text("SELECT * FROM evidence_items WHERE id=CAST(:id AS uuid) AND user_id=CAST(:uid AS uuid)"), {"id": as_uuid(evidence_id), "uid": as_uuid(user_id)}).mappings().first()
+            matches = []
+            if row is not None:
+                matches_row = conn.execute(text("SELECT r.id::text AS radar_id,r.name,r.monitoring_mode AS mode,re.relevance_score,re.relevance_reasons,re.relevance_breakdown AS ranking,re.discovered_at FROM radar_evidence re JOIN radars r ON r.id=re.radar_id AND r.user_id=re.user_id WHERE re.evidence_id=CAST(:id AS uuid) AND re.user_id=CAST(:uid AS uuid) ORDER BY re.relevance_score DESC,re.discovered_at DESC"), {"id": as_uuid(evidence_id), "uid": as_uuid(user_id)}).mappings().all()
+                matches = [dict(match) for match in matches_row]
         if row is None: raise AppError("EVIDENCE_NOT_FOUND", "未找到该证据。", 404)
-        return self._evidence_from_row(row)
+        record = self._evidence_from_row(row)
+        ranking = (matches[0].get("ranking") or {"score": matches[0].get("relevance_score"), "reasons": matches[0].get("relevance_reasons", [])}) if matches else None
+        return record.model_copy(update={"radars": matches, "intelligence_ranking": ranking})
 
     def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
         # One transaction with a row lock: concurrent conversions serialize, and the

@@ -3,7 +3,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from .api import billing, briefs, dashboard, intelligence, opportunities, pipeline, profile, radars, skills
+from .api import billing, briefs, dashboard, intelligence, local, opportunities, pipeline, profile, radars, skills
 from .core.config import get_settings
 from .core.errors import AppError, app_error_handler
 
@@ -57,7 +57,7 @@ async def request_id(request: Request, call_next):
     response = await call_next(request); response.headers["X-Request-ID"] = request.headers.get("X-Request-ID", str(uuid4())); return response
 @app.get("/health", tags=["Health"])
 async def health(): return {"status":"ok"}
-for router in (billing.router, profile.router, radars.router, opportunities.router, skills.router, pipeline.router, briefs.router, dashboard.router, intelligence.router): app.include_router(router)
+for router in (billing.router, profile.router, radars.router, opportunities.router, skills.router, pipeline.router, briefs.router, dashboard.router, intelligence.router, local.router): app.include_router(router)
 
 
 @app.get("/ready",tags=["Health"])

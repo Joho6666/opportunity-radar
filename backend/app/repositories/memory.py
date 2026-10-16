@@ -45,6 +45,8 @@ class MemoryRepository:
         self.pain_points: dict[tuple[str, str], PainPointRead] = {}
         self.evidence: dict[tuple[str, str], EvidenceRecord] = {}
         self.evidence_batches: dict[tuple[str, str], set[str]] = defaultdict(set)
+        self.radar_evidence: dict[tuple[str, str], dict] = {}
+        self.local_settings: dict[str, str] = {}
     def get_profile(self, user_id: str) -> ProfileRead:
         if user_id not in self.profiles:
             self.profiles[user_id] = ProfileRead(id=str(uuid4()), user_id=user_id, display_name="新用户", identity="", location="", monthly_income_goal=0, minimum_project_budget=0, available_hours_per_day=0, skills=[], goals=[])
@@ -139,7 +141,8 @@ class MemoryRepository:
         return self._raw_items.get(hash_url(url))
 
     def create_run(self, radar_id: str) -> RadarRunRead:
-        run = RadarRunRead(id=str(uuid4()), radar_id=radar_id, status="queued", stats=RadarRunStats(), stage_stats={"created_at":datetime.now(UTC).isoformat()})
+        now = datetime.now(UTC)
+        run = RadarRunRead(id=str(uuid4()), radar_id=radar_id, status="queued", stats=RadarRunStats(), stage_stats={"created_at":now.isoformat()}, started_at=now)
         self.runs[run.id] = run
         return run
 
@@ -147,7 +150,7 @@ class MemoryRepository:
         run=self.get_run(user_id,run_id)
         if run.status != "queued":
             return None
-        return self.save_run(run.model_copy(update={"status":"running"}))
+        return self.save_run(run.model_copy(update={"status":"running", "stage_stats": {**run.stage_stats, "heartbeat_at": datetime.now(UTC).isoformat()}}))
 
     def recover_run(self, user_id, run_id, reason):
         from datetime import timedelta
@@ -174,6 +177,38 @@ class MemoryRepository:
     def runs_of_user(self, user_id: str) -> list[RadarRunRead]:
         ids = {radar.id for radar in self.list_radars(user_id)}
         return [run for run in self.runs.values() if run.radar_id in ids]
+
+    def list_queued_runs(self, user_id: str) -> list[tuple[str, str, str]]:
+        return [(user_id, run.radar_id, run.id) for run in self.runs_of_user(user_id) if run.status == "queued"]
+
+    def heartbeat_run(self, run_id: str) -> None:
+        run = self.runs.get(run_id)
+        if run and run.status == "running":
+            self.runs[run_id] = run.model_copy(update={"stage_stats": {**run.stage_stats, "heartbeat_at": datetime.now(UTC).isoformat()}})
+
+    def interrupt_stale_runs(self, user_id: str, stale_seconds: int) -> int:
+        threshold = datetime.now(UTC) - timedelta(seconds=stale_seconds)
+        interrupted = 0
+        for run in self.runs_of_user(user_id):
+            if run.status != "running":
+                continue
+            value = run.stage_stats.get("heartbeat_at") or run.stage_stats.get("created_at")
+            stamp = datetime.fromisoformat(value) if value else datetime.min.replace(tzinfo=UTC)
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=UTC)
+            if stamp < threshold:
+                self.save_run(run.model_copy(update={"status": "failed", "error_code": "LOCAL_WORKER_INTERRUPTED", "error_message": "Worker heartbeat expired; no automatic rerun was made."}))
+                interrupted += 1
+        return interrupted
+
+    def get_local_settings(self, user_id: str) -> str:
+        return self.local_settings.get(user_id, "off")
+
+    def save_local_settings(self, user_id: str, ai_mode: str) -> str:
+        if ai_mode not in {"off", "on_demand"}:
+            raise AppError("INVALID_AI_MODE", "AI 模式无效。", 422)
+        self.local_settings[user_id] = ai_mode
+        return ai_mode
 
     def add_opportunity(self, item: OpportunityRead, user_id: str | None = None) -> OpportunityRead:
         if item.evidence_id:
@@ -266,11 +301,13 @@ class MemoryRepository:
     def get_brief(self, user_id: str, brief_date: date) -> DailyBriefRead | None:
         return self.briefs.get((user_id, brief_date.isoformat()))
 
-    def list_due_radars(self, now: datetime) -> list[tuple[str, str]]:
+    def list_due_radars(self, now: datetime, *, local_user_id: str | None = None) -> list[tuple[str, str]]:
         running = {run.radar_id for run in self.runs.values() if run.status in {"queued", "running"}}
         due: list[tuple[str, str]] = []
         for radar in self.radars.values():
             if radar.status != "active" or radar.id in running or radar.frequency not in {"hourly","daily","weekly"}:
+                continue
+            if local_user_id is not None and (radar.user_id != local_user_id or not radar.local_schedule_enabled):
                 continue
             if radar.next_run_at is None or radar.next_run_at <= now:
                 due.append((radar.user_id, radar.id))
@@ -321,6 +358,44 @@ class MemoryRepository:
         records = [record for (owner, _), record in self.evidence.items() if owner == user_id and (category is None or record.category == category)]
         records.sort(key=lambda record: record.captured_at, reverse=True)
         return records[:limit]
+
+    def list_intelligence_feed(self, user_id: str, *, radar_id: str | None = None, category: str | None = None, source: str | None = None, query: str = "", saved: bool | None = None, unread: bool | None = None, cursor_at=None, cursor_id: str | None = None, cursor_order: str = "recent", cursor_score: int | None = None, cursor_saved: bool | None = None, limit: int = 30, order: str = "recent") -> list[EvidenceRecord]:
+        values = [record for (owner, _), record in self.evidence.items() if owner == user_id]
+        values = [record for record in values if (category is None or record.category == category) and (source is None or record.source == source) and (saved is None or record.is_saved == saved) and (unread is None or record.is_read == (not unread)) and (not query or query.casefold() in f"{record.raw_text} {record.url} {record.query}".casefold())]
+        if radar_id:
+            values = [record for record in values if (radar_id, record.evidence_id) in self.radar_evidence]
+        if cursor_at is not None and cursor_id:
+            if cursor_order != order:
+                raise AppError("INVALID_CURSOR", "收件箱游标与当前排序不匹配，请刷新列表。", 400)
+            if order == "relevance":
+                values = [record for record in values if ((record.intelligence_ranking or {}).get("relevance_score", (record.intelligence_ranking or {}).get("score", 0)), record.captured_at, record.evidence_id) < (cursor_score or 0, cursor_at, cursor_id)]
+            elif order == "saved":
+                values = [record for record in values if (record.is_saved, record.captured_at, record.evidence_id) < (bool(cursor_saved), cursor_at, cursor_id)]
+            else:
+                values = [record for record in values if (record.captured_at, record.evidence_id) < (cursor_at, cursor_id)]
+        if order == "relevance":
+            values.sort(key=lambda item: ((item.intelligence_ranking or {}).get("relevance_score", (item.intelligence_ranking or {}).get("score", 0)), item.captured_at, item.evidence_id), reverse=True)
+        elif order == "saved":
+            values.sort(key=lambda item: (item.is_saved, item.captured_at), reverse=True)
+        else:
+            values.sort(key=lambda item: item.captured_at, reverse=True)
+        return values[:limit]
+
+    def update_evidence_state(self, user_id: str, evidence_id: str, *, saved: bool | None = None, read: bool | None = None) -> EvidenceRecord:
+        current = self.get_evidence(user_id, evidence_id)
+        updated = current.model_copy(update={"is_saved": current.is_saved if saved is None else saved, "is_read": current.is_read if read is None else read})
+        self.evidence[(user_id, current.identity_key)] = updated
+        return updated
+
+    def link_evidence_to_radar(self, user_id: str, radar_id: str, evidence_id: str, run_id: str | None, score: int, reasons: list[str], ranking: dict | None = None) -> None:
+        self.get_radar(user_id, radar_id)
+        evidence = self.get_evidence(user_id, evidence_id)
+        association = {"radar_id": radar_id, "name": self.get_radar(user_id, radar_id).name, "mode": self.get_radar(user_id, radar_id).mode, "relevance_score": score, "relevance_reasons": reasons, "ranking": ranking or {}, "run_id": run_id}
+        self.radar_evidence[(radar_id, evidence_id)] = association
+        links = [value for (rid, eid), value in self.radar_evidence.items() if eid == evidence_id]
+        best = max(links, key=lambda value: value["relevance_score"], default=None)
+        ranking_details = best.get("ranking") or {"score": best["relevance_score"], "reasons": best["relevance_reasons"]}
+        self.evidence[(user_id, evidence.identity_key)] = evidence.model_copy(update={"radars": links, "intelligence_ranking": ranking_details})
 
     def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
         # Synchronous mutation runs as one critical section (no awaits in API).
@@ -489,8 +564,8 @@ class MemoryRepository:
         selected = [pain for pain in self.pain_points.values() if pain.radar_id in radar_ids]
         return sorted(selected, key=lambda item: item.severity, reverse=True)[:limit]
 
-    def list_radar_pairs(self) -> list[tuple[str, str]]:
-        return [(radar.user_id, radar.id) for radar in self.radars.values()]
+    def list_radar_pairs(self, user_id: str | None = None) -> list[tuple[str, str]]:
+        return [(radar.user_id, radar.id) for radar in self.radars.values() if user_id is None or radar.user_id == user_id]
 
 
 repository = MemoryRepository()

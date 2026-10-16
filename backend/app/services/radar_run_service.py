@@ -86,7 +86,7 @@ class RadarRunService:
 
     async def run(self, user_id: str, radar_id: str, run_id: str):
         radar = self.repository.get_radar(user_id, radar_id)
-        profile = self.repository.get_profile(user_id)
+        profile = self.repository.get_profile(user_id) if radar.mode == "acquisition" else None
         run = self.repository.claim_run(user_id, run_id)
         if run is None:
             return self.repository.get_run(user_id, run_id)
@@ -94,6 +94,12 @@ class RadarRunService:
         billing = paid_context(self.repository, user_id, radar.id, run.id, scheduled=run.stage_stats.get("trigger") == "scheduled")
         billing.__enter__()
         token = bind_llm_context(repository=self.repository, user_id=user_id, radar_id=radar.id, run_id=run.id)
+        import asyncio
+        async def heartbeat():
+            while True:
+                await asyncio.sleep(15)
+                await asyncio.to_thread(self.repository.heartbeat_run, run.id)
+        heartbeat_task = asyncio.create_task(heartbeat())
         try:
             preference = self.repository.get_preference(user_id)
             queries = radar.queries or await plan_queries(radar, preference)
@@ -104,7 +110,10 @@ class RadarRunService:
             for query in queries:
                 source = query.source if hasattr(query, "source") else query["source"]
                 text = query.query if hasattr(query, "query") else query["query"]
-                items, error = await self.collectors.search(source, text)
+                if source == "rss" and radar.mode == "general" and radar.source_config.get("rss_feed_url"):
+                    items, error = await self.collectors.search(source, text, source_config=radar.source_config)
+                else:
+                    items, error = await self.collectors.search(source, text)
                 raw.extend(items)
                 if error:
                     collector_errors.append(error)
@@ -116,7 +125,7 @@ class RadarRunService:
             from .collection_filter import filter_page
             timed, policy_filtered = filter_page(unique, radar.collection_policy, freshness_hours=radar.freshness_hours, now=now)
             stage.after_freshness = len(timed)
-            vectors = embed_texts([f"{item.title} {item.content}" for item in timed]) if timed else []
+            vectors = embed_texts([f"{item.title} {item.content}" for item in timed]) if timed and radar.mode == "acquisition" else None
             if vectors is not None:
                 stage.embedding_calls = 1
             known_urls = {item.url for item in timed if self.repository.has_raw(radar.id, item.url)}
@@ -125,9 +134,14 @@ class RadarRunService:
             from .semantic_classifier import enrich_batch
             evidence_items = [item.model_copy(update={"metadata": {**item.metadata, "radar_id": radar.id, "collection_policy":radar.collection_policy.model_dump_json(),"collection_freshness_hours":str(radar.freshness_hours), "incremental_known": "true" if item.url in known_urls else "false"}}) for item in timed if len((item.content or item.title).strip()) >= 10]
             evidence_by_url = {}
+            canonical_urls = {}
             if evidence_items:
+                from pydantic import HttpUrl, TypeAdapter
+                url_adapter = TypeAdapter(HttpUrl)
+                canonical_urls = {item.url: str(url_adapter.validate_python(item.url)) for item in evidence_items}
                 batch = raw_items_to_evidence_batch(source="", query=radar.name, items=evidence_items[:500], batch_id=run.id)
-                batch = await enrich_batch(batch)
+                if radar.mode == "acquisition":
+                    batch = await enrich_batch(batch)
                 stored = self.repository.upsert_evidence_batch(user_id, batch)
                 evidence_by_url = {str(record.url): record for record in stored.records}
             for known_item in timed:
@@ -136,6 +150,24 @@ class RadarRunService:
             aligned = align_vectors_to_items(timed, vectors, known_urls)
             stage.after_known = len(fresh)
             known = len(timed) - len(fresh)
+            if radar.mode == "general":
+                from .intelligence_ranking import score_information
+                for item in timed:
+                    self.repository.mark_raw(radar.id, item.url, item)
+                    evidence = evidence_by_url.get(canonical_urls.get(item.url, item.url))
+                    if evidence is None:
+                        continue
+                    ranking = score_information(item, radar, is_new=item.url not in known_urls, now=now)
+                    self.repository.link_evidence_to_radar(user_id, radar.id, evidence.evidence_id, run.id, ranking["score"], ranking["reasons"], ranking)
+                stats = RadarRunStats(queries=len(queries), items_found=len(raw), duplicates_removed=removed + known, analyzed=len(evidence_by_url), opportunities_found=0)
+                finished_at = datetime.now(UTC)
+                error_code = "COLLECTORS_FAILED" if collector_errors and not raw else None
+                error_message = "; ".join(error["message"] for error in collector_errors)[:500] if collector_errors else None
+                run = run.model_copy(update={"status": "completed", "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": {**run.stage_stats, **stage.model_dump(), "collection_filtered": policy_filtered}})
+                self.repository.record_collection(user_id, run.id, "radar", len(raw), len(evidence_by_url), removed + known, policy_filtered["stale"])
+                self.repository.save_run(run)
+                self.repository.save_radar(radar.model_copy(update={"status": "active", "last_run_at": finished_at, "next_run_at": next_run_at(radar.frequency, finished_at), "stats": stats}))
+                return run
             created = []
             signals = []
             semantic_removed = 0
@@ -156,7 +188,7 @@ class RadarRunService:
             cluster_payment: dict[str, int] = defaultdict(int)
             cluster_rep_text: dict[str, str] = {}
             trend_keywords: dict[str, int] = defaultdict(int)
-            profile_skills = [skill.name for skill in profile.skills]
+            profile_skills = [skill.name for skill in profile.skills] if profile else []
             for item, vector in aligned:
                 if vector is not None and self.repository.find_similar_raw(radar.id, vector) is not None:
                     # cross-run L4: this content (or a paraphrase) is already in history
@@ -318,6 +350,11 @@ class RadarRunService:
             self.repository.save_radar(radar.model_copy(update={"status": "error"}))
             return run
         finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
             reset_llm_context(token)
             billing.__exit__(None, None, None)
 

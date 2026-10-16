@@ -94,6 +94,15 @@ async def analyze_profile(request: ProfileAnalyzeRequest) -> ProfileAnalysis:
 
 async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = None) -> list[QueryPlanItem]:
     sources = radar.sources or ["hackernews"]
+    if radar.mode == "general":
+        topics = radar.keywords or [radar.goal.strip()]
+        plans = []
+        for source in sources:
+            for topic in topics:
+                plans.append(QueryPlanItem(query=topic, source=source, priority=max(70, 92 - len(plans) * 3)))
+                if len(plans) >= 10:
+                    return plans
+        return plans
     if preference:
         sources = sorted(sources, key=lambda slug: preference.source_weights.get(slug, 0.0), reverse=True)
     prompt = f"为机会雷达生成搜索查询计划。目标：{radar.goal}；关键词：{radar.keywords}；地区：{radar.locations}；来源：{sources}。生成不超过 10 条查询，source 必须来自已选来源。"

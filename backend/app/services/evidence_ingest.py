@@ -79,6 +79,10 @@ class EvidenceRecord(BaseModel):
     acquisition_tool: str = ""
     notes: str = ""
     converted_opportunity_id: str | None = None
+    is_saved: bool = False
+    is_read: bool = False
+    radars: list[dict] = Field(default_factory=list)
+    intelligence_ranking: dict | None = None
 
     @computed_field
     @property

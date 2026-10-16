@@ -43,7 +43,7 @@ class CollectorRegistry:
     def slugs(self) -> list[str]:
         return sorted(self._adapters)
 
-    async def search(self, slug: str, query: str, cursor: str | None = None, *, paged: bool = False):
+    async def search(self, slug: str, query: str, cursor: str | None = None, *, paged: bool = False, source_config: dict[str, str] | None = None):
         adapter = self.get(slug)
         if adapter is None:
             logger.warning("unknown collector slug skipped", extra={"slug": slug})
@@ -53,7 +53,9 @@ class CollectorRegistry:
             return [], {"source":slug,"error_code":"SOURCE_CIRCUIT_OPEN","message":"来源暂时熔断，请稍后重试"}
         started = time.perf_counter()
         try:
-            if paged:
+            if source_config and hasattr(adapter, "search_configured"):
+                items = await adapter.search_configured(query, source_config)
+            elif paged:
                 items, next_cursor = await adapter.search_page(query,cursor)
                 from ..services.billing_gateway import _context
                 if _context.get() is not None:

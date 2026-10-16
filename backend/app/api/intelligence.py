@@ -3,6 +3,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+import json
 
 from ..api.deps import get_current_user, get_repository
 from ..collectors.registry import registry
@@ -32,6 +34,11 @@ class EvidenceCollectRequest(BaseModel):
     manual_confirmed: bool = False
     request_id: str | None = Field(default=None,min_length=8,max_length=100,pattern=r"^[A-Za-z0-9:_-]+$")
     billing_batch_id: str | None = Field(default=None,max_length=100)
+
+
+class EvidenceStateUpdate(BaseModel):
+    saved: bool | None = None
+    read: bool | None = None
 
 
 def _source_status() -> dict:
@@ -240,6 +247,60 @@ async def list_evidence(
 ):
     return repo.list_evidence(user.id, category=category, limit=limit)
 
+
+@router.get("/evidence/inbox")
+async def browse_evidence(
+    radar_id: str | None = None,
+    category: str | None = Query(default=None, pattern="^(buyer|seller|job|content|market)$"),
+    source: str | None = Query(default=None, max_length=80),
+    q: str = Query(default="", max_length=300),
+    saved: bool | None = None,
+    unread: bool | None = None,
+    cursor: str | None = Query(default=None, max_length=256),
+    limit: int = Query(default=30, ge=1, le=100),
+    order: str = Query(default="recent", pattern="^(recent|relevance|saved)$"),
+    user: CurrentUser = Depends(get_current_user),
+    repo: Repository = Depends(get_repository),
+):
+    cursor_at = cursor_id = None
+    cursor_score = None
+    cursor_saved = None
+    cursor_order = order
+    if cursor:
+        try:
+            decoded = json.loads(urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+            cursor_at, cursor_id = decoded["at"], decoded["id"]
+            cursor_order = decoded.get("order", "recent")
+            cursor_score = decoded.get("score")
+            cursor_saved = decoded.get("saved")
+            if cursor_order != order or (cursor_score is not None and (not isinstance(cursor_score, int) or not 0 <= cursor_score <= 100)) or (cursor_saved is not None and not isinstance(cursor_saved, bool)):
+                raise ValueError("cursor order or sort value mismatch")
+            from datetime import UTC, datetime
+            cursor_at = datetime.fromisoformat(cursor_at)
+            if cursor_at.tzinfo is None:
+                cursor_at = cursor_at.replace(tzinfo=UTC)
+            from uuid import UUID
+            cursor_id = str(UUID(str(cursor_id)))
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise AppError("INVALID_CURSOR", "收件箱游标无效，请刷新列表。", 400) from exc
+    rows = repo.list_intelligence_feed(user.id, radar_id=radar_id, category=category, source=source, query=q.strip(), saved=saved, unread=unread, cursor_at=cursor_at, cursor_id=cursor_id, cursor_order=cursor_order, cursor_score=cursor_score, cursor_saved=cursor_saved, limit=limit + 1, order=order)
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        score = max((int(match.get("relevance_score") or 0) for match in last.radars), default=0)
+        encoded = json.dumps({"at": last.captured_at.isoformat(), "id": last.evidence_id, "order": order, "score": score, "saved": last.is_saved}, separators=(",", ":")).encode()
+        next_cursor = urlsafe_b64encode(encoded).decode().rstrip("=")
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more, "limit": limit}
+
+
+@router.patch("/evidence/{evidence_id}/state", response_model=EvidenceRecord)
+async def update_evidence_state(evidence_id: str, payload: EvidenceStateUpdate, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    if payload.saved is None and payload.read is None:
+        raise AppError("EVIDENCE_STATE_REQUIRED", "请指定收藏或已读状态。", 422)
+    return repo.update_evidence_state(user.id, evidence_id, saved=payload.saved, read=payload.read)
+
 @router.patch("/evidence/{evidence_id}/review", response_model=EvidenceRecord)
 async def review_evidence(evidence_id: str, payload: EvidenceReview, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     return repo.review_evidence(user.id, evidence_id, payload)
@@ -258,6 +319,11 @@ async def export_labels(user: CurrentUser = Depends(get_current_user), repo: Rep
                      "published_at":record.published_at.isoformat() if record.published_at else None,"captured_at":record.captured_at.isoformat(),
                      "human_label":True,"dataset_kind":"real","assessment":record.assessment})
     return {"rows":rows,"count":len(rows),"target":250,"usage":"human labels only; review source/repost groups before freezing splits"}
+
+
+@router.get("/evidence/{evidence_id}", response_model=EvidenceRecord)
+async def get_evidence(evidence_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    return repo.get_evidence(user.id, evidence_id)
 
 @router.post("/evidence/{evidence_id}/convert", response_model=OpportunityRead)
 async def convert_evidence(evidence_id: str, payload: EvidenceConversion, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):

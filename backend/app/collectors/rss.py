@@ -21,6 +21,17 @@ class RssCollector(SourceAdapter):
 
     async def search(self, query: str) -> list[RawItem]:
         feeds = _feeds_for(query)
+        topic = "" if query.startswith(("http://", "https://")) else query
+        return await self._search_feeds(feeds, topic)
+
+    async def search_configured(self, query: str, source_config: dict[str, str]) -> list[RawItem]:
+        """Read only the explicitly configured public feed and retain topic filtering."""
+        feed_url = (source_config.get("rss_feed_url") or "").strip()
+        if not feed_url:
+            return await self.search(query)
+        return await self._search_feeds([feed_url], query)
+
+    async def _search_feeds(self, feeds: list[str], topic: str) -> list[RawItem]:
         items: list[RawItem] = []
         for feed_url in feeds:
             try:
@@ -29,11 +40,11 @@ class RssCollector(SourceAdapter):
             except AppError:
                 raise
             parsed = feedparser.parse(response.text) if feedparser else {"entries": []}
-            for entry in parsed.get("entries", [])[:10]:
+            for entry in parsed.get("entries", []):
                 url = entry.get("link") or feed_url
                 title = clean_text(entry.get("title")) or url
                 content = clean_text(entry.get("summary") or entry.get("description")) or title
-                if query and query.lower() not in f"{title} {content}".lower() and not query.startswith("http"):
+                if topic and topic.casefold() not in f"{title} {content}".casefold():
                     continue
                 items.append(
                     RawItem(
@@ -47,9 +58,11 @@ class RssCollector(SourceAdapter):
                         updated_at_source=_updated(entry),
                         platform="rss",
                         engagement={},
-                        metadata={"feed": feed_url, "query": query,"content_kind":"article"},
+                        metadata={"feed": feed_url, "query": topic,"content_kind":"article"},
                     )
                 )
+                if len(items) >= 50:
+                    return items
         return items
 
 

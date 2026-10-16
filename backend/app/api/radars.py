@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from ..api.deps import get_current_user, get_repository
 from ..core.security import CurrentUser
+from ..core.config import get_settings
 from ..repositories.base import Repository
 from ..schemas.domain import RadarCreate, RadarRead, RadarRunRead
 from ..services.listener_service import compile_listener
@@ -48,7 +49,7 @@ async def put_radar(radar_id: str, value: RadarCreate, user: CurrentUser = Depen
     changes = value.model_dump()
     # model_copy does not validate nested dictionaries. Revalidate the policy,
     # and invalidate cached query plans after the user's search input changes.
-    if any(getattr(old, key) != getattr(value, key) for key in ("goal", "keywords", "sources", "listener_description")):
+    if any(getattr(old, key) != getattr(value, key) for key in ("goal", "keywords", "sources", "source_config", "mode", "listener_description")):
         changes["queries"] = []
     return repo.save_radar(RadarRead.model_validate({**old.model_dump(), **changes}))
 
@@ -60,9 +61,15 @@ async def delete_radar(radar_id: str, user: CurrentUser = Depends(get_current_us
 
 @router.post("/{radar_id}/run", response_model=RadarRunRead, status_code=202)
 async def run_radar(radar_id: str, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
-    repo.get_radar(user.id, radar_id)
+    radar = repo.get_radar(user.id, radar_id)
     run = repo.create_run(radar_id)
-    await enqueue_radar_run(user.id, radar_id, run.id)
+    if run.status == "queued":
+        try:
+            await enqueue_radar_run(user.id, radar_id, run.id)
+        except Exception as exc:
+            if get_settings().app_env.lower() != "local":
+                raise
+            run = repo.save_run(run.model_copy(update={"stage_stats": {**run.stage_stats, "dispatch_status": "waiting_for_redis", "dispatch_error": getattr(exc, "code", "QUEUE_UNAVAILABLE")}}))
     return run
 
 
