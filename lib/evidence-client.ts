@@ -1,5 +1,6 @@
 import { getAccessToken } from "@/lib/auth";
 import type { CollectionPolicy } from "@/lib/collection-policy";
+import { apiBaseUrl } from "@/lib/api-url";
 
 export type PostRanking = {kind:"prediction";lead_score:number;label:string;reasons:string[];signals:{published_at:string|null;last_activity_at:string|null;age_hours:number|null;author_visible:boolean;identity_status:"unverified";comments:number|null;interactions:number|null;heat_score:number|null;heat_reason:string}};
 
@@ -105,7 +106,7 @@ export type EvidenceRuntime = {
 };
 export type EvidenceCollectResult = EvidenceBatchResult & { next_cursor?: string | null; billing_batch_id?:string|null;request_id?:string|null; fetched: number; rejected: number; stale?:number; filtered?:{stale:number;unknown_date:number;terms:number;activity:number}; warning: string | null };
 
-const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8011";
+const baseUrl = apiBaseUrl;
 
 export function buildEvidenceQuery(category: EvidenceCategory, limit = 100): string {
   const params = new URLSearchParams({ category, limit: String(limit) });

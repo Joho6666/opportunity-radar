@@ -8,7 +8,7 @@ import { Button, PageHeader, Panel } from "@/components/ui";
 import { useMockMode } from "@/lib/api-client";
 import { useOpportunityStore } from "@/stores/use-opportunity-store";
 
-export default function Settings() {
+function CloudSettings() {
   const reset = useOpportunityStore((state) => state.reset);
   const [notice, setNotice] = useState("");
   const localAuthDisabled = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_AUTH_DISABLED === "true";
@@ -23,3 +23,6 @@ export default function Settings() {
     </div>
   </AppShell>;
 }
+
+import { LocalSettings } from "@/features/local-workspace";
+export default function Settings() { return process.env.NEXT_PUBLIC_APP_MODE === "local" ? <LocalSettings/> : <CloudSettings/>; }

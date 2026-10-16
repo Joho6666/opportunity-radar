@@ -12,7 +12,7 @@ import { DEFAULT_COLLECTION_POLICY, splitTerms, validPolicy, type CollectionPoli
 import { EVIDENCE_SOURCES, SOURCE_LABELS } from "@/lib/evidence-client";
 const sources = EVIDENCE_SOURCES.map(value => [value, SOURCE_LABELS[value]] as const);
 
-export default function NewRadar() {
+function CloudNewRadar() {
   const router = useRouter();
   const addRadar = useOpportunityStore((s) => s.addRadar);
   const [name, setName] = useState("AI 视频广告客户");
@@ -54,3 +54,6 @@ export default function NewRadar() {
     </Panel>
   </AppShell>;
 }
+
+import { LocalNewRadar } from "@/features/local-workspace";
+export default function NewRadar() { return process.env.NEXT_PUBLIC_APP_MODE === "local" ? <LocalNewRadar/> : <CloudNewRadar/>; }

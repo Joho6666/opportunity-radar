@@ -3,7 +3,7 @@ services:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: opportunity_radar
+      POSTGRES_DB: ${LOCAL_DB_NAME:-opportunity_radar}
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?local.env must define LOCAL_DB_PASSWORD}
     command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=30"]
@@ -13,7 +13,7 @@ services:
       - local_pgdata:/var/lib/postgresql/data
       - ./docker/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d opportunity_radar"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${LOCAL_DB_NAME:-opportunity_radar}"]
       interval: 5s
       timeout: 3s
       retries: 30

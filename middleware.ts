@@ -1,9 +1,31 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { hasUntrustedNextHeaders } from "@/lib/local-request-guards";
 
 const protectedPrefixes = ["/evidence", "/dashboard", "/opportunities", "/radars", "/daily-brief", "/pipeline", "/saved", "/skills", "/profile", "/settings"];
 
+function localRedirect(path: string) {
+  // Middleware redirect Location must remain absolute for Next's server-side
+  // redirect handling. Use the explicitly configured loopback origin instead
+  // of trusting forwarded host headers or a canonicalized request URL.
+  return NextResponse.redirect(new URL(path, process.env.LOCAL_UI_ORIGIN || "http://127.0.0.1:3004"));
+}
+
 export async function middleware(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_APP_MODE === "local") {
+    const host = process.env.LOCAL_UI_ORIGIN ? new URL(process.env.LOCAL_UI_ORIGIN).host : "127.0.0.1:3004";
+    if (request.headers.get("host") !== host || hasUntrustedNextHeaders(request.headers, host, request.nextUrl.protocol)) return new NextResponse("Local Edition only accepts direct loopback requests.", { status: 403 });
+    const path = request.nextUrl.pathname;
+    if (path.startsWith("/api/")) return NextResponse.next();
+    const paired = Boolean(request.cookies.get("or_local_session")?.value);
+    if (path === "/" && paired) return localRedirect("/dashboard");
+    // A cookie may be expired or forged. Keep the pairing page reachable so the
+    // owner can create a fresh one-time ticket; API routes still verify the HMAC.
+    if (path === "/pair") return NextResponse.next();
+    if (!paired) return localRedirect("/pair");
+    if (path === "/login") return localRedirect("/dashboard");
+    return NextResponse.next();
+  }
   // Next dev adds x-forwarded-for from its socket. Bind dev to loopback; the API
   // independently rejects every proxy header. Production never uses this UI bypass.
   if (process.env.NEXT_PUBLIC_AUTH_DISABLED === "true" && process.env.NODE_ENV === "development" && ["localhost", "127.0.0.1", "[::1]"].includes(request.nextUrl.hostname) && !["forwarded", "x-real-ip"].some(h => request.headers.has(h)) && (request.headers.get("x-forwarded-for") ?? "127.0.0.1").split(",").every(peer => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer.trim()))) return NextResponse.next();

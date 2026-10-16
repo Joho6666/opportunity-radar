@@ -35,7 +35,7 @@ function EditCollection({ radar, onClose }: {radar:Radar;onClose:()=>void}) {
   </Panel>;
 }
 
-export default function RadarDetail() {
+function CloudRadarDetail() {
   const { id } = useParams<{id:string}>();
   const radar = useOpportunityStore(s=>s.radars.find(r=>r.id===id));
   const toggle = useOpportunityStore(s=>s.toggleRadar);
@@ -66,3 +66,6 @@ export default function RadarDetail() {
     </Panel><Panel className="p-5"><h2 className="font-semibold">最近实际查询</h2>{radar.queries?.length ? <ul className="mono mt-4 space-y-2 text-sm text-indigo-800">{radar.queries.map((q,i)=><li key={i}>{q.source}：{q.query}</li>)}</ul> : <p className="mt-4 text-sm text-muted">尚无查询记录；首次运行后显示实际提交的查询。</p>}<p className="mt-4 text-xs text-muted">最后运行：{radar.lastRunAt} · 下次运行：{radar.nextRunAt}</p><Link href="/evidence" className="mt-4 inline-block text-sm text-indigo-700 underline">查看采集帖子与评分</Link></Panel></div>
   </AppShell>;
 }
+
+import { LocalRadarDetail } from "@/features/local-workspace";
+export default function RadarDetail() { return process.env.NEXT_PUBLIC_APP_MODE === "local" ? <LocalRadarDetail/> : <CloudRadarDetail/>; }

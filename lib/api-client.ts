@@ -1,6 +1,7 @@
 import type { Opportunity, Profile, Radar } from "@/types/domain";
 
-const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8011";
+import { apiBaseUrl } from "@/lib/api-url";
+const baseUrl = apiBaseUrl;
 export const useMockMode = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_USE_MOCK === "true";
 class ApiError extends Error { constructor(message: string, public readonly code = "API_ERROR") { super(message); } }
 export async function apiRequest<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {

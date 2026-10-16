@@ -372,4 +372,6 @@ function EvidenceInbox() {
   );
 }
 
-export default function Page() { return <AppShell><EvidenceInbox /></AppShell>; }
+import LocalInbox from "@/features/local-inbox";
+function CloudPage() { return <AppShell><EvidenceInbox /></AppShell>; }
+export default function Page() { return process.env.NEXT_PUBLIC_APP_MODE === "local" ? <LocalInbox/> : <CloudPage/>; }
