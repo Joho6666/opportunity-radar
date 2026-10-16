@@ -6,6 +6,8 @@
 
 当前能力和限制：[CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)；生产升级：[docs/PRODUCTION_UPGRADE.md](docs/PRODUCTION_UPGRADE.md)；TikHub 累计额度与关键词回放：[docs/TIKHUB_DEBUGGING.md](docs/TIKHUB_DEBUGGING.md)；长期方向：[MONEY_INTELLIGENCE_ROADMAP.md](MONEY_INTELLIGENCE_ROADMAP.md)。没有数据时显示暂无数据；任何分类分数均不代表成交概率。
 
+Mac 单用户 Local Edition 的隔离配置、启动、备份与恢复步骤见 [Local Edition 使用手册](docs/LOCAL_EDITION_RUNBOOK.md)。它使用独立数据库副本和 127.0.0.1 服务；付费 API、自动 AI、Mock 采集及自动删除默认关闭。
+
 关键词获客入口：证据收件箱→采集，或我的雷达→创建/编辑配置。可设时间窗口、包含/排除词、公开活跃信号和已采集结果的热度排序；每条帖子显示获客分、热度及依据。真人身份仍待核实，国内付费实采仍关闭。使用示例和来源范围见[关键词采集说明](docs/KEYWORD_COLLECTION.md)。
 
 ## 本机使用（持久化、付费关闭）
