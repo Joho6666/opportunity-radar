@@ -9,6 +9,7 @@ from ..services.daily_intelligence import assemble
 from ..services.income import potential_income_range
 from ..services.evidence_ingest import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult, normalize_evidence
 from ..schemas.evidence import EvidenceReview
+from ..schemas.identity import IdentityProfile
 
 
 class MemoryRepository:
@@ -47,6 +48,7 @@ class MemoryRepository:
         self.evidence_batches: dict[tuple[str, str], set[str]] = defaultdict(set)
         self.radar_evidence: dict[tuple[str, str], dict] = {}
         self.local_settings: dict[str, str] = {}
+        self.identities: dict[str, dict] = {}
     def get_profile(self, user_id: str) -> ProfileRead:
         if user_id not in self.profiles:
             self.profiles[user_id] = ProfileRead(id=str(uuid4()), user_id=user_id, display_name="新用户", identity="", location="", monthly_income_goal=0, minimum_project_budget=0, available_hours_per_day=0, skills=[], goals=[])
@@ -209,6 +211,14 @@ class MemoryRepository:
             raise AppError("INVALID_AI_MODE", "AI 模式无效。", 422)
         self.local_settings[user_id] = ai_mode
         return ai_mode
+
+    def get_identity(self, user_id: str) -> IdentityProfile | None:
+        payload = self.identities.get(user_id)
+        return IdentityProfile.model_validate(payload) if payload else None
+
+    def save_identity(self, user_id: str, value: IdentityProfile) -> IdentityProfile:
+        self.identities[user_id] = value.model_dump()
+        return value
 
     def add_opportunity(self, item: OpportunityRead, user_id: str | None = None) -> OpportunityRead:
         if item.evidence_id:
@@ -396,6 +406,23 @@ class MemoryRepository:
         best = max(links, key=lambda value: value["relevance_score"], default=None)
         ranking_details = best.get("ranking") or {"score": best["relevance_score"], "reasons": best["relevance_reasons"]}
         self.evidence[(user_id, evidence.identity_key)] = evidence.model_copy(update={"radars": links, "intelligence_ranking": ranking_details})
+
+    def list_radar_results(self, user_id: str, radar_id: str, *, status: str | None = None, limit: int = 20, offset: int = 0) -> list[tuple[EvidenceRecord, dict]]:
+        """内存版结果分页，排序与 Postgres 保持一致：相关度 DESC、证据 id ASC。"""
+        self.get_radar(user_id, radar_id)
+        rows: list[tuple[EvidenceRecord, dict]] = []
+        for (owner_radar, evidence_id), association in self.radar_evidence.items():
+            if owner_radar != radar_id:
+                continue
+            ranking = association.get("ranking") or {}
+            if status and (ranking.get("hunt_match") or {}).get("status") != status:
+                continue
+            record = next((value for (owner, _), value in self.evidence.items() if owner == user_id and value.evidence_id == evidence_id), None)
+            if record is None:
+                continue
+            rows.append((record, {"score": association.get("relevance_score"), "reasons": association.get("relevance_reasons") or [], "ranking": ranking, "matched_at": None, "run_id": association.get("run_id")}))
+        rows.sort(key=lambda pair: (-int(pair[1].get("score") or 0), pair[0].evidence_id))
+        return rows[offset: offset + limit + 1]
 
     def convert_evidence(self, user_id: str, evidence_id: str, item: OpportunityRead) -> OpportunityRead:
         # Synchronous mutation runs as one critical section (no awaits in API).

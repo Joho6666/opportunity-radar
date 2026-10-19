@@ -10,6 +10,7 @@ from ..core.errors import AppError
 from ..schemas.domain import DailyBriefRead, OpportunityAction, OpportunityRead, PreferenceState, ProfileRead, ProfileUpsert, QueryPlanItem, RadarCreate, RadarRead, RadarRunRead, RadarRunStats, RawItem, SkillInput
 from ..schemas.intelligence import ChangeEventRead, EventClusterRead, SignalRead, SourceHealthRead, TrendSnapshotRead, TrendTopicRead
 from ..schemas.evidence import EvidenceBatch, EvidenceRecord, EvidenceUpsertResult, EvidenceReview
+from ..schemas.identity import IdentityProfile
 from ..services.evidence_ingest import normalize_evidence
 
 
@@ -355,7 +356,7 @@ class PostgresRepository:
         return self.get_run(user_id,run_id)
 
     def save_run(self, run: RadarRunRead) -> RadarRunRead:
-        finished = datetime.now(UTC) if run.status in {"completed", "failed"} else None
+        finished = datetime.now(UTC) if run.status in {"completed", "partial", "failed"} else None
         with self._conn() as conn:
             conn.execute(
                 text(
@@ -393,7 +394,7 @@ class PostgresRepository:
 
     def _run_from_row(self, row) -> RadarRunRead:
         stats = RadarRunStats(queries=row["query_count"] or 0, items_found=row["items_found"] or 0, duplicates_removed=row["items_deduplicated"] or 0, analyzed=row["items_analyzed"] or 0, opportunities_found=row["opportunities_found"] or 0, matched=row["matched_count"] or 0, recommended=row["recommended_count"] or 0)
-        return RadarRunRead(id=str(row["id"]), radar_id=str(row["radar_id"]), status=row["status"], stats=stats, error_message=row["error_message"], error_code=row["error_code"] if "error_code" in row.keys() else None, started_at=row["started_at"], finished_at=row["finished_at"], stage_stats={"heartbeat_at": row["heartbeat_at"].isoformat() if row.get("heartbeat_at") else None} if "heartbeat_at" in row.keys() else {})
+        return RadarRunRead(id=str(row["id"]), radar_id=str(row["radar_id"]), status=row["status"], stats=stats, error_message=row["error_message"], error_code=row["error_code"] if "error_code" in row.keys() else None, started_at=row["started_at"], finished_at=row["finished_at"], stage_stats={**(row.get("stage_stats") or {}), "heartbeat_at": row["heartbeat_at"].isoformat() if row.get("heartbeat_at") else None})
 
     def add_opportunity(self, item: OpportunityRead, user_id: str | None = None) -> OpportunityRead:
         with self._conn() as conn:
@@ -708,6 +709,23 @@ class PostgresRepository:
             conn.execute(text("INSERT INTO local_settings(user_id,ai_mode) VALUES(CAST(:uid AS uuid),:mode) ON CONFLICT(user_id) DO UPDATE SET ai_mode=EXCLUDED.ai_mode,updated_at=now()"), {"uid": as_uuid(user_id), "mode": ai_mode})
         return ai_mode
 
+    def get_identity(self, user_id: str) -> IdentityProfile | None:
+        with self._conn() as conn:
+            row = conn.execute(text("SELECT identity_profile FROM local_settings WHERE user_id=CAST(:uid AS uuid)"), {"uid": as_uuid(user_id)}).first()
+        if not row or row[0] is None:
+            return None
+        try:
+            return IdentityProfile.model_validate(row[0])
+        except ValueError:
+            return None
+
+    def save_identity(self, user_id: str, value: IdentityProfile) -> IdentityProfile:
+        import json
+        with self._conn() as conn:
+            conn.execute(text("INSERT INTO local_settings(user_id,identity_profile) VALUES(CAST(:uid AS uuid),CAST(:payload AS jsonb)) ON CONFLICT(user_id) DO UPDATE SET identity_profile=EXCLUDED.identity_profile,updated_at=now()"),
+                         {"uid": as_uuid(user_id), "payload": json.dumps(value.model_dump(), ensure_ascii=False)})
+        return value
+
     def record_llm_call(self, user_id: str | None, radar_id: str | None, run_id: str | None, provider: str | None, model: str, latency_ms: int, fallbacked: bool, schema_name: str, stage: str | None = None, input_count: int | None = None, output_count: int | None = None, prompt_tokens: int | None = None, completion_tokens: int | None = None, cost_usd: float | None = None) -> None:
         with self._conn() as conn:
             conn.execute(
@@ -882,6 +900,24 @@ class PostgresRepository:
     def link_evidence_to_radar(self, user_id: str, radar_id: str, evidence_id: str, run_id: str | None, score: int, reasons: list[str], ranking: dict | None = None) -> None:
         with self._conn() as conn:
             conn.execute(text("INSERT INTO radar_evidence(user_id,radar_id,evidence_id,run_id,relevance_score,relevance_reasons,relevance_breakdown) SELECT CAST(:uid AS uuid),r.id,e.id,CAST(:run AS uuid),:score,CAST(:reasons AS jsonb),CAST(:ranking AS jsonb) FROM radars r JOIN evidence_items e ON e.user_id=r.user_id WHERE r.id=CAST(:rid AS uuid) AND r.user_id=CAST(:uid AS uuid) AND e.id=CAST(:eid AS uuid) ON CONFLICT (radar_id,evidence_id) DO UPDATE SET run_id=EXCLUDED.run_id, relevance_score=EXCLUDED.relevance_score, relevance_reasons=EXCLUDED.relevance_reasons, relevance_breakdown=EXCLUDED.relevance_breakdown"), {"uid": as_uuid(user_id), "rid": as_uuid(radar_id), "eid": as_uuid(evidence_id), "run": as_uuid(run_id) if run_id else None, "score": max(0, min(100, int(score))), "reasons": json.dumps(reasons, ensure_ascii=False), "ranking": json.dumps(ranking or {}, ensure_ascii=False)})
+
+    def list_radar_results(self, user_id: str, radar_id: str, *, status: str | None = None, limit: int = 20, offset: int = 0) -> list[tuple[EvidenceRecord, dict]]:
+        """Agent 结果分页：固定排序 (相关度 DESC, 发现时间 DESC, 证据 id ASC)，status 过滤 hunt_match.status。"""
+        filters = ["re.user_id=CAST(:uid AS uuid)", "re.radar_id=CAST(:rid AS uuid)", "rr.user_id=CAST(:uid AS uuid)"]
+        params = {"uid": as_uuid(user_id), "rid": as_uuid(radar_id), "status": status, "limit": limit + 1, "offset": offset}
+        if status:
+            filters.append("re.relevance_breakdown->'hunt_match'->>'status'=:status")
+        sql = ("SELECT e.*, re.relevance_score AS match_score, re.relevance_reasons AS match_reasons, re.relevance_breakdown AS match_breakdown, re.discovered_at AS matched_at, re.run_id AS match_run_id "
+               "FROM radar_evidence re JOIN evidence_items e ON e.id=re.evidence_id AND e.user_id=re.user_id JOIN radars rr ON rr.id=re.radar_id AND rr.user_id=re.user_id "
+               "WHERE " + " AND ".join(filters) + " ORDER BY re.relevance_score DESC NULLS LAST, re.discovered_at DESC, e.id ASC LIMIT :limit OFFSET :offset")
+        with self._conn() as conn:
+            rows = conn.execute(text(sql), params).mappings().all()
+        results: list[tuple[EvidenceRecord, dict]] = []
+        for row in rows:
+            payload = dict(row)
+            match = {"score": payload.pop("match_score", None), "reasons": payload.pop("match_reasons", None) or [], "ranking": payload.pop("match_breakdown", None) or {}, "matched_at": payload.pop("matched_at", None), "run_id": (str(payload.pop("match_run_id", None)) if payload.get("match_run_id") else None)}
+            results.append((self._evidence_from_row(payload), match))
+        return results
 
     def get_evidence(self, user_id: str, evidence_id: str) -> EvidenceRecord:
         with self._conn() as conn:
