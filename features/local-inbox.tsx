@@ -7,7 +7,8 @@ import { AppShell } from "@/components/app-shell";
 import { Button, DetailDrawer, EmptyState, PageHeader, Panel } from "@/components/ui";
 import { formatLocalDate, localRequest } from "@/lib/local-edition";
 
-type FeedItem = { evidence_id: string; source: string; url: string; raw_text: string; query: string; category: string; published_at: string | null; captured_at: string; is_saved: boolean; is_read: boolean; classification_reason: string; classification_confidence: number; verification_status: string; metadata: Record<string, string>; radars: { radar_id: string; name: string; mode: string; relevance_score: number; relevance_reasons: string[] }[]; intelligence_ranking?: { score: number; reasons: string[]; label: string } | null };
+type HuntMatch = { status: "strict" | "pending" | "mismatch" | "hiring_signal"; evidence: Record<string,string>; missing: string[]; conflicts: string[]; evidence_level: string; match_mode: string };
+type FeedItem = { evidence_id: string; source: string; url: string; raw_text: string; query: string; category: string; published_at: string | null; captured_at: string; is_saved: boolean; is_read: boolean; classification_reason: string; classification_confidence: number; verification_status: string; metadata: Record<string, string>; radars: { radar_id: string; name: string; mode: string; ranking?: { hunt_match?: HuntMatch }; relevance_score: number; relevance_reasons: string[] }[]; intelligence_ranking?: { score: number; reasons: string[]; label: string; hunt_match?: HuntMatch } | null };
 type FeedPage = { items: FeedItem[]; next_cursor: string | null; has_more: boolean };
 type Analysis = { source: "model" | "rules"; category: string; confidence: number; reason: string; fallback_reason: string | null; intent_quote: string | null; payment_quote: string | null; deadline_quote: string | null; saved: false };
 type Radar = { id: string; name: string };
@@ -19,7 +20,8 @@ function firstRadarScore(item: FeedItem) { return item.intelligence_ranking?.sco
 export default function LocalInbox() {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [radars, setRadars] = useState<Radar[]>([]);
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState("buyer");
+  const [matchFilter, setMatchFilter] = useState("");
   const [state, setState] = useState("all");
   const [order, setOrder] = useState("recent");
   const [radarId, setRadarId] = useState("");
@@ -42,6 +44,7 @@ export default function LocalInbox() {
     const params = new URLSearchParams(window.location.search);
     setSelectedId(params.get("selected") ?? "");
     setRadarId(params.get("radar_id") ?? "");
+    if (params.get("radar_id")) setCategory("");
     if (params.get("saved") === "true") setState("saved");
   }, []);
   useEffect(() => { const media = matchMedia("(min-width: 1280px)"); const sync = () => setWide(media.matches); sync(); media.addEventListener("change", sync); return () => media.removeEventListener("change", sync); }, []);
@@ -60,7 +63,7 @@ export default function LocalInbox() {
     return params.toString();
   }, [category, state, order, radarId, source, appliedSearch]);
 
-  const load = useCallback(async (append = false, next = cursor) => {
+  const load = useCallback(async (append = false, next: string | null = null) => {
     if (append) setLoadingMore(true); else { setLoading(true); setItems([]); setCursor(null); }
     setError("");
     try {
@@ -71,7 +74,7 @@ export default function LocalInbox() {
       setCursor(page.next_cursor); setHasMore(page.has_more);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "收件箱暂不可用。"); }
     finally { setLoading(false); setLoadingMore(false); }
-  }, [cursor, queryString]);
+  }, [queryString]);
   useEffect(() => { void load(false, null); }, [load]);
 
   const selected = items.find(item => item.evidence_id === selectedId) ?? (selectedExtra?.evidence_id === selectedId ? selectedExtra : null);
@@ -107,6 +110,10 @@ export default function LocalInbox() {
     finally { setAnalyzing(false); }
   }
 
+  function huntMatch(item: FeedItem) { return radarId ? item.radars.find(r => r.radar_id === radarId)?.ranking?.hunt_match : item.intelligence_ranking?.hunt_match; }
+  const visibleItems = matchFilter ? items.filter(item => huntMatch(item)?.status === matchFilter) : items;
+  const selectedMatch = selected ? huntMatch(selected) : undefined;
+  const matchLabels = { strict: "严格匹配", pending: "待确认", mismatch: "不匹配", hiring_signal: "招聘信号" };
   const detail = selected ? <div className="space-y-4 p-4">
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted"><span className="rounded bg-slate-100 px-2 py-1">{selected.source}</span><span>{selected.category}</span><span>{formatLocalDate(selected.published_at)}</span><span>采集于 {formatLocalDate(selected.captured_at)}</span></div>
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm">人工状态：{selected.verification_status === "verified" ? "已核实" : selected.verification_status === "invalidated" ? "已排除" : "待复核"}</p><Button variant="secondary" onClick={() => void toggleSaved(selected)}><Bookmark size={15} fill={selected.is_saved ? "currentColor" : "none"}/>{selected.is_saved ? "已收藏" : "收藏"}</Button></div>
@@ -114,24 +121,27 @@ export default function LocalInbox() {
     {selected.radars?.length > 0 && <div><h3 className="text-xs font-medium text-muted">发现主题</h3><p className="mt-1 text-sm">{selected.radars.map(radar => radar.name).join("、")}</p></div>}
     {firstRadarScore(selected) != null && <div><h3 className="text-xs font-medium text-muted">情报相关度</h3><p className="mt-1 text-2xl font-semibold tabular-nums">{firstRadarScore(selected)}<span className="ml-1 text-sm font-normal text-muted">/100 · 排序启发式</span></p><p className="mt-1 text-xs text-muted">不代表买方意向或成交概率。</p></div>}
     {selected.intelligence_ranking?.reasons?.length ? <ul className="list-disc space-y-1 pl-5 text-xs leading-5 text-muted">{selected.intelligence_ranking.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : null}
+    {selectedMatch && <div className="rounded border border-line p-3"><h3 className="text-sm font-semibold">{matchLabels[selectedMatch.status]}</h3><p className="mt-1 text-xs text-muted">证据层级：{selectedMatch.evidence_level} · 规则匹配，不是人工确认</p><dl className="mt-2 space-y-2 text-sm">{Object.entries(selectedMatch.evidence).map(([field,quote]) => <div key={field}><dt className="text-xs text-muted">{field}</dt><dd>“{quote}”</dd></div>)}</dl>{selectedMatch.missing.length > 0 && <p className="mt-2 text-xs text-amber-900">缺失 / 待确认：{selectedMatch.missing.join("、")}</p>}{selectedMatch.conflicts.length > 0 && <p className="mt-2 text-xs text-red-800">不匹配依据：{selectedMatch.conflicts.join("；")}</p>}</div>}
     {selected.classification_reason && <div><h3 className="text-xs font-medium text-muted">规则分类依据</h3><p className="mt-1 text-sm">{selected.classification_reason}</p></div>}
     <div className="border-t border-line pt-4"><h3 className="mb-2 text-xs font-medium text-muted">原始内容</h3><pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7">{selected.raw_text}</pre></div>
     <a href={selected.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 text-sm text-ai underline">打开原文 <ExternalLink size={15}/></a>
   </div> : <p className="p-8 text-center text-sm text-muted">选择一条信息查看详情。</p>;
 
   return <AppShell>
-    <PageHeader title="情报收件箱" description="按主题、来源和状态筛选公开信息；打开详情只更新已读状态，不更改人工核实结论。" action={<Link href="/radars/new"><Button>新建关注主题</Button></Link>}/>
+    <PageHeader title="买方候选 / 原文" description="默认仅看规则识别的买方候选，不代表已核实客户。可切换全部类别排查推广、教程或漏判；发布时间不是采集时间。" action={<Link href="/radars/new"><Button>新建抓单</Button></Link>}/>
     <form className="mb-4 flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); setAppliedSearch(search); }}>
       <label className="relative min-w-56 flex-1"><Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"/><input aria-label="搜索情报" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索原文、关键词或链接" className="h-11 w-full rounded-md border border-line bg-white pl-8 pr-3 text-sm"/></label><Button variant="secondary" type="submit">搜索</Button>
       <select aria-label="情报类别" className="h-11 rounded-md border border-line bg-white px-2 text-sm" value={category} onChange={event => setCategory(event.target.value)}>{categories.map(([value,label]) => <option value={value} key={value}>{label}</option>)}</select>
       <select aria-label="收件箱状态" className="h-11 rounded-md border border-line bg-white px-2 text-sm" value={state} onChange={event => setState(event.target.value)}><option value="all">全部状态</option><option value="unread">未读</option><option value="saved">收藏</option></select>
       <select aria-label="关注主题" className="h-11 max-w-48 rounded-md border border-line bg-white px-2 text-sm" value={radarId} onChange={event => setRadarId(event.target.value)}><option value="">所有主题</option>{radars.map(radar => <option key={radar.id} value={radar.id}>{radar.name}</option>)}</select>
       <select aria-label="内容来源" className="h-11 rounded-md border border-line bg-white px-2 text-sm" value={source} onChange={event => setSource(event.target.value)}><option value="">全部来源</option>{[...new Set(items.map(item => item.source))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select>
+      <select aria-label="条件匹配分类" value={matchFilter} onChange={e => setMatchFilter(e.target.value)} className="h-11 rounded border border-line bg-white px-2 text-sm"><option value="">全部匹配分类</option><option value="strict">严格匹配</option><option value="pending">待确认</option><option value="mismatch">不匹配</option><option value="hiring_signal">招聘信号</option></select>
       <select aria-label="排序方式" className="h-11 rounded-md border border-line bg-white px-2 text-sm" value={order} onChange={event => setOrder(event.target.value)}><option value="recent">最近采集</option><option value="relevance">主题相关度</option><option value="saved">收藏优先</option></select>
     </form>
+    <p className="mb-3 text-xs text-muted">条件匹配分类仅筛选已加载页；旧数据未重新采集不补判。严格需所有所选必要字段有原文证据；搜索摘要、地区或角色未知保留待确认。时间显示 Asia/Shanghai，评论时间不代替原帖时间。</p>
     {error && <Panel className="mb-3 border-red-200 p-3" role="alert"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-red-800">{error}</span><Button variant="secondary" disabled={loading} onClick={() => void load(false, null)}><RefreshCw size={15}/>重试</Button></div></Panel>}
-    {loading && !items.length ? <Panel className="flex items-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18}/>正在加载情报…</Panel> : !loading && !error && !items.length ? <EmptyState title="暂无匹配情报"><p className="text-sm text-muted">可以修改筛选条件，或到我的雷达创建主题并手动运行。</p><Link href="/radars/new"><Button className="mt-4">创建主题雷达</Button></Link></EmptyState> : <div className="grid items-start gap-0 rounded-lg border border-line bg-white xl:grid-cols-[minmax(0,1fr)_400px]">
-      <div className="min-w-0"><div className="flex min-h-10 items-center justify-between border-b border-line bg-slate-50 px-4 text-xs text-muted"><span>{items.length} 条信息</span><span>无数据不代表零机会</span></div><div className="divide-y divide-line">{items.map(item => <div key={item.evidence_id} className={`border-l-2 px-4 py-3 ${selectedId === item.evidence_id ? "border-ai bg-indigo-50/50" : "border-transparent"}`}><button type="button" onClick={() => select(item)} className="block w-full text-left"><span className="line-clamp-2 text-sm font-medium leading-6">{headline(item)}</span><span className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted"><span>{item.source}</span><span>{formatLocalDate(item.published_at)}</span>{firstRadarScore(item) != null && <span>相关度 {firstRadarScore(item)}</span>}<span>{item.is_read ? "已读" : "未读"}</span></span></button></div>)}</div>{hasMore && <div className="border-t border-line p-3 text-center"><Button variant="secondary" disabled={loadingMore} onClick={() => void load(true)}>{loadingMore && <Loader2 className="animate-spin" size={15}/>}加载更多</Button></div>}</div>
+    {loading && !items.length ? <Panel className="flex items-center gap-2 p-10 text-sm text-muted"><Loader2 className="animate-spin" size={18}/>正在加载情报…</Panel> : !loading && !error && !items.length ? <EmptyState title="暂无匹配结果"><p className="text-sm text-muted">可以切换全部类别查看其他结果，或新建抓单并手动运行。</p><Link href="/radars/new"><Button className="mt-4">新建抓单</Button></Link></EmptyState> : <div className="grid items-start gap-0 rounded-lg border border-line bg-white xl:grid-cols-[minmax(0,1fr)_400px]">
+      <div className="min-w-0"><div className="flex min-h-10 items-center justify-between border-b border-line bg-slate-50 px-4 text-xs text-muted"><span>{visibleItems.length} / {items.length} 条已加载信息</span><span>无数据不代表零机会</span></div><div className="divide-y divide-line">{visibleItems.map(item => <div key={item.evidence_id} className={`border-l-2 px-4 py-3 ${selectedId === item.evidence_id ? "border-ai bg-indigo-50/50" : "border-transparent"}`}><button type="button" onClick={() => select(item)} className="block w-full text-left"><span className="line-clamp-2 text-sm font-medium leading-6">{headline(item)}</span><span className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted"><span>{item.source}</span><span>{huntMatch(item) ? matchLabels[huntMatch(item)!.status] : "未启用条件匹配"}</span><span>{item.category === "buyer" ? "买方候选 · 待核实" : item.category}</span><span>发布 {formatLocalDate(item.published_at)}</span>{firstRadarScore(item) != null && <span>相关度 {firstRadarScore(item)}</span>}<span>{item.is_read ? "已读" : "未读"}</span></span></button></div>)}</div>{hasMore && <div className="border-t border-line p-3 text-center"><Button variant="secondary" disabled={loadingMore} onClick={() => void load(true, cursor)}>{loadingMore && <Loader2 className="animate-spin" size={15}/>}加载更多</Button></div>}</div>
       <aside className="sticky top-20 hidden max-h-[calc(100vh-100px)] overflow-y-auto border-l border-line xl:block">{detail}</aside>
     </div>}
     <DetailDrawer open={!wide && !!selected} title="情报详情" onClose={() => { setSelectedId(""); const params = new URLSearchParams(window.location.search); params.delete("selected"); history.replaceState(null, "", params.size ? `${window.location.pathname}?${params}` : window.location.pathname); }}>{detail}</DetailDrawer>

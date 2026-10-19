@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from ..api.deps import get_current_user, get_repository
 from ..core.security import CurrentUser
 from ..core.config import get_settings
 from ..repositories.base import Repository
-from ..schemas.domain import RadarCreate, RadarRead, RadarRunRead
+from ..schemas.domain import RadarCreate, RadarRead, RadarRunRead, SourceSlug
+from ..services.identity_defaults import apply_identity_defaults, identity_defaults_for
 from ..services.listener_service import compile_listener
 from ..workers.queue import enqueue_radar_run
 
 router = APIRouter(prefix="/api/radars", tags=["Radars"])
+
+
+def _with_identity_defaults(user_id: str, value: RadarCreate, repo: Repository) -> RadarCreate:
+    """抓单雷达未填写的条件从个人身份设定补齐；用户显式选择永不覆盖，旧雷达不受影响。"""
+    return apply_identity_defaults(value, identity_defaults_for(repo, user_id))
 
 
 async def _with_listener_config(user_id: str, value: RadarCreate, repo: Repository, radar_id: str | None = None) -> RadarCreate:
@@ -33,6 +40,7 @@ async def list_radars(user: CurrentUser = Depends(get_current_user), repo: Repos
 
 @router.post("", response_model=RadarRead, status_code=201)
 async def create_radar(value: RadarCreate, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
+    value = _with_identity_defaults(user.id, value, repo)
     value = await _with_listener_config(user.id, value, repo)
     return repo.create_radar(user.id, value)
 
@@ -45,6 +53,7 @@ async def get_radar(radar_id: str, user: CurrentUser = Depends(get_current_user)
 @router.put("/{radar_id}", response_model=RadarRead)
 async def put_radar(radar_id: str, value: RadarCreate, user: CurrentUser = Depends(get_current_user), repo: Repository = Depends(get_repository)):
     old = repo.get_radar(user.id, radar_id)
+    value = _with_identity_defaults(user.id, value, repo)
     value = await _with_listener_config(user.id, value, repo, radar_id=radar_id)
     changes = value.model_dump()
     # model_copy does not validate nested dictionaries. Revalidate the policy,
@@ -70,6 +79,40 @@ async def run_radar(radar_id: str, user: CurrentUser = Depends(get_current_user)
             if get_settings().app_env.lower() != "local":
                 raise
             run = repo.save_run(run.model_copy(update={"stage_stats": {**run.stage_stats, "dispatch_status": "waiting_for_redis", "dispatch_error": getattr(exc, "code", "QUEUE_UNAVAILABLE")}}))
+    return run
+
+
+class SourceRerun(BaseModel):
+    source: SourceSlug
+    query: str = Field(min_length=1, max_length=100)
+    confirmed: bool = False
+
+
+@router.post("/{radar_id}/rerun-source", response_model=RadarRunRead, status_code=202)
+async def rerun_source(radar_id: str, payload: SourceRerun, user: CurrentUser = Depends(get_current_user),
+                       repo: Repository = Depends(get_repository)):
+    """One platform only, one short query, explicit paid confirmation; never auto-retries."""
+    radar = repo.get_radar(user.id, radar_id)
+    if payload.source not in radar.sources:
+        raise HTTPException(status_code=400, detail="该平台不在雷达来源中。")
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="需要人工确认本次付费调用。")
+    query = payload.query.strip()
+    if not query or len(query) > 100:
+        raise HTTPException(status_code=400, detail="短词须为 1–100 字。")
+    run = repo.create_run(radar_id)
+    if run.status == "queued":
+        run = repo.save_run(run.model_copy(update={"stage_stats": {
+            **run.stage_stats, "source_override": payload.source, "query_override": query,
+            "rerun_reason": "manual_short_keyword"}}))
+        try:
+            await enqueue_radar_run(user.id, radar_id, run.id)
+        except Exception as exc:
+            if get_settings().app_env.lower() != "local":
+                raise
+            run = repo.save_run(run.model_copy(update={"stage_stats": {
+                **run.stage_stats, "dispatch_status": "waiting_for_redis",
+                "dispatch_error": getattr(exc, "code", "QUEUE_UNAVAILABLE")}}))
     return run
 
 

@@ -95,10 +95,10 @@ async def analyze_profile(request: ProfileAnalyzeRequest) -> ProfileAnalysis:
 async def plan_queries(radar: RadarCreate, preference: PreferenceState | None = None) -> list[QueryPlanItem]:
     sources = radar.sources or ["hackernews"]
     if radar.mode == "general":
-        topics = radar.keywords or [radar.goal.strip()]
+        from .hunt_conditions import hunt_topics
         plans = []
         for source in sources:
-            for topic in topics:
+            for topic in hunt_topics(radar, source) or [radar.goal.strip()]:
                 plans.append(QueryPlanItem(query=topic, source=source, priority=max(70, 92 - len(plans) * 3)))
                 if len(plans) >= 10:
                     return plans

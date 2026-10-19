@@ -1,7 +1,7 @@
 import logging
 import re
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timedelta
 from uuid import uuid4
 
 from ..collectors.registry import registry
@@ -60,6 +60,10 @@ def _hours_since(value: datetime | None, now: datetime) -> float | None:
     return max(0.0, (now - value).total_seconds() / 3600)
 
 
+def _query_field(query, name: str) -> str:
+    return getattr(query, name) if hasattr(query, name) else query.get(name, "")
+
+
 def align_vectors_to_items(items, vectors, known_urls: set[str]):
     """Keep each embedding paired with its original item after known-item filtering."""
     if vectors is None:
@@ -102,28 +106,71 @@ class RadarRunService:
         heartbeat_task = asyncio.create_task(heartbeat())
         try:
             preference = self.repository.get_preference(user_id)
-            queries = radar.queries or await plan_queries(radar, preference)
+            from .hunt_conditions import conditions_for, assess_hunt
+            hunt_cfg = conditions_for(radar)
+            queries = await plan_queries(radar, preference) if hunt_cfg else radar.queries or await plan_queries(radar, preference)
+            override_source = run.stage_stats.get("source_override")
+            override_query = run.stage_stats.get("query_override")
+            if override_source:
+                queries = [query for query in queries if _query_field(query, "source") == override_source]
+                if override_query:
+                    from ..schemas.domain import QueryPlanItem
+                    queries = [QueryPlanItem(query=override_query, source=override_source, priority=95)]
+            # 特殊模式一次运行只发一个查询单元：频道列表/链接列表/职位搜索由
+            # 采集器内部展开，避免按关键词重复付费。视频号分享链每条 2 次附加
+            # 调用，也不接受多关键词重复。
+            single_query_sources = {"telegram", "linkedin", "toutiao"}
+            if (radar.source_config or {}).get("wechat_business_type") == "video":
+                single_query_sources.add("wechat_search")
+            seen_single: set[str] = set()
+            limited_queries = []
+            for query in queries:
+                source = _query_field(query, "source")
+                if source in single_query_sources and source in seen_single:
+                    continue
+                seen_single.add(source)
+                limited_queries.append(query)
+            queries = limited_queries
             radar = radar.model_copy(update={"queries": queries, "status": "running"})
             self.repository.save_radar(radar)
             raw = []
             collector_errors = []
+            source_stats: dict[str, dict] = {}
             for query in queries:
                 source = query.source if hasattr(query, "source") else query["source"]
                 text = query.query if hasattr(query, "query") else query["query"]
-                if source == "rss" and radar.mode == "general" and radar.source_config.get("rss_feed_url"):
-                    items, error = await self.collectors.search(source, text, source_config=radar.source_config)
+                stat = source_stats.setdefault(source, {"source": source, "requests": 0, "returned": 0,
+                                                        "ingested": 0, "queries": [], "errors": []})
+                from .provider_plan import planned_provider_calls
+                try:
+                    stat["requests"] += planned_provider_calls(source, radar.source_config or {})
+                except Exception:
+                    stat["requests"] += 1
+                if text not in stat["queries"]:
+                    stat["queries"].append(text)
+                if radar.source_config and (source in {"xiaohongshu", "douyin", "weibo", "zhihu", "reddit", "bilibili", "kuaishou", "lemon8", "pipixia", "threads", "twitter", "youtube", "wechat_search", "telegram", "linkedin", "toutiao"} or source == "rss" and radar.mode == "general" and radar.source_config.get("rss_feed_url")):
+                    items, error = await self.collectors.search(source, text, source_config={**radar.source_config, "freshness_hours": str(radar.freshness_hours)})
                 else:
                     items, error = await self.collectors.search(source, text)
                 raw.extend(items)
+                stat["returned"] += len(items)
                 if error:
                     collector_errors.append(error)
+                    stat["errors"].append(error.get("error_code") or error.get("message") or "COLLECTOR_ERROR")
             self.repository.record_collection(user_id,run.id,"radar",len(raw),0)
             stage = StageStats(collected=len(raw))
             unique, removed = deduplicate(raw)
             stage.after_dedup = len(unique)
             now = datetime.now(UTC)
             from .collection_filter import filter_page
-            timed, policy_filtered = filter_page(unique, radar.collection_policy, freshness_hours=radar.freshness_hours, now=now)
+            filter_hours = max(1, int((now - hunt_cfg.start_at).total_seconds()/3600)+1) if hunt_cfg and hunt_cfg.start_at else radar.freshness_hours
+            timed, policy_filtered = filter_page(unique, radar.collection_policy, freshness_hours=filter_hours, now=now)
+            if hunt_cfg:
+                lower = hunt_cfg.start_at or now - timedelta(hours=radar.freshness_hours)
+                upper = hunt_cfg.end_at or now
+                in_range = [item for item in timed if item.published_at and lower <= (item.published_at if item.published_at.tzinfo else item.published_at.replace(tzinfo=UTC)) <= upper]
+                policy_filtered["stale"] += len(timed)-len(in_range)
+                timed = in_range
             stage.after_freshness = len(timed)
             vectors = embed_texts([f"{item.title} {item.content}" for item in timed]) if timed and radar.mode == "acquisition" else None
             if vectors is not None:
@@ -132,7 +179,7 @@ class RadarRunService:
             fresh = [item for item in timed if item.url not in known_urls]
             from .evidence_from_raw import raw_items_to_evidence_batch
             from .semantic_classifier import enrich_batch
-            evidence_items = [item.model_copy(update={"metadata": {**item.metadata, "radar_id": radar.id, "collection_policy":radar.collection_policy.model_dump_json(),"collection_freshness_hours":str(radar.freshness_hours), "incremental_known": "true" if item.url in known_urls else "false"}}) for item in timed if len((item.content or item.title).strip()) >= 10]
+            evidence_items = [item.model_copy(update={"metadata": {**item.metadata, "radar_id": radar.id, "collection_policy":radar.collection_policy.model_dump_json(),"collection_freshness_hours":str(filter_hours), "incremental_known": "true" if item.url in known_urls else "false"}}) for item in timed if len((item.content or item.title).strip()) >= 10]
             evidence_by_url = {}
             canonical_urls = {}
             if evidence_items:
@@ -158,15 +205,50 @@ class RadarRunService:
                     if evidence is None:
                         continue
                     ranking = score_information(item, radar, is_new=item.url not in known_urls, now=now)
+                    if item.metadata.get("lead_kind") == "hiring_signal":
+                        from .hunt_conditions import assess_hiring_signal
+                        match = assess_hiring_signal(item)
+                        ranking["hunt_match"] = match
+                        ranking["label"] = "招聘信号"
+                        ranking["reasons"] = ["招聘信号（潜在客户线索）", *match["missing"],
+                                              "在招视频相关岗位的公司通常有制作需求"]
+                        ranking["score"] = 35
+                        ranking["signal_kind"] = "hiring_signal"
+                    elif hunt_cfg:
+                        match = assess_hunt(item, radar, now=now)
+                        ranking["hunt_match"] = match
+                        ranking["label"] = {"strict":"严格匹配", "pending":"待确认", "mismatch":"不匹配"}[match["status"]]
+                        ranking["reasons"] = [ranking["label"], *match["missing"], *match["conflicts"]]
+                        ranking["score"] = {"strict":90, "pending":50, "mismatch":0}[match["status"]]
+                        if match["status"] == "pending" and hunt_cfg.match_mode == "local" and "需求地区" not in match["evidence"]:
+                            ranking["score"] = 20
+                        elif match["status"] == "pending" and hunt_cfg.match_mode == "remote" and "合作方式" in match["evidence"]:
+                            ranking["score"] = 60
                     self.repository.link_evidence_to_radar(user_id, radar.id, evidence.evidence_id, run.id, ranking["score"], ranking["reasons"], ranking)
+                ingested_by_source: dict[str, int] = {}
+                for item in timed:
+                    canonical = canonical_urls.get(item.url, item.url)
+                    if canonical in evidence_by_url:
+                        ingested_by_source[item.source] = ingested_by_source.get(item.source, 0) + 1
+                for stat in source_stats.values():
+                    stat["ingested"] = ingested_by_source.get(stat["source"], 0)
+                selected_sources = [source for source in radar.sources if source in source_stats]
+                unmet_sources = [source for source in selected_sources if source_stats[source]["ingested"] == 0]
+                acceptance = {"passed": not unmet_sources, "selected": len(selected_sources),
+                              "passed_sources": len(selected_sources) - len(unmet_sources),
+                              "unmet_sources": unmet_sources}
                 stats = RadarRunStats(queries=len(queries), items_found=len(raw), duplicates_removed=removed + known, analyzed=len(evidence_by_url), opportunities_found=0)
                 finished_at = datetime.now(UTC)
                 error_code = "COLLECTORS_FAILED" if collector_errors and not raw else None
                 error_message = "; ".join(error["message"] for error in collector_errors)[:500] if collector_errors else None
-                run = run.model_copy(update={"status": "completed", "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": {**run.stage_stats, **stage.model_dump(), "collection_filtered": policy_filtered}})
+                failed_hunt = bool(error_code and radar.source_config.get("lead_hunt") == "true")
+                run_status = "failed" if failed_hunt else ("partial" if unmet_sources else "completed")
+                if unmet_sources:
+                    error_message = ((error_message + "; ") if error_message else "") + "未达标平台：" + "、".join(unmet_sources) + "（0 条入库）"
+                run = run.model_copy(update={"status": run_status, "finished_at": finished_at, "stats": stats, "error_code": error_code, "error_message": error_message, "collector_errors": collector_errors, "stage_stats": {**run.stage_stats, **stage.model_dump(), "collection_filtered": policy_filtered, "source_stats": list(source_stats.values()), "acceptance": acceptance}})
                 self.repository.record_collection(user_id, run.id, "radar", len(raw), len(evidence_by_url), removed + known, policy_filtered["stale"])
                 self.repository.save_run(run)
-                self.repository.save_radar(radar.model_copy(update={"status": "active", "last_run_at": finished_at, "next_run_at": next_run_at(radar.frequency, finished_at), "stats": stats}))
+                self.repository.save_radar(radar.model_copy(update={"status": "error" if failed_hunt else "active", "last_run_at": finished_at, "next_run_at": next_run_at(radar.frequency, finished_at), "stats": stats}))
                 return run
             created = []
             signals = []
