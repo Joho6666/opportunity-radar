@@ -1,0 +1,79 @@
+{
+ "code": 200,
+ "data": {
+  "business_type": "video",
+  "total": 251,
+  "results": {
+   "data": [
+    {
+     "subBoxes": [
+      {
+       "items": [
+        {
+         "docID": "finderobjv0IX3sh7p35IjB7XTf2iVI9cwRZ3HCIAJK4zQvnPBZtmU=",
+         "hashDocID": "13621483585715377508",
+         "exportId": "export/UzFfBgAAxKuHMGRAdie2k8zT4DCKOaf4fb4Vd1PT9n85v8Eojw",
+         "title": "邪修用百度搭子实现AI自动<em class=\"highlight\">剪辑</em>！我不允许还有人没用上！#自动<em class=\"highlight\">剪辑</em>#自媒体#<em class=\"highlight\">视频剪辑</em>",
+         "pubTime": 1792342075,
+         "duration": "00:39",
+         "feedNonceId": "16318863815457175415",
+         "source": {
+          "title": "呆呆小熊3416"
+         }
+        },
+        {
+         "docID": "finderobjv0OVaGWi5aXhaE5Ek9/+tIeyKqz5flu2PMw/w4qtQHgaM=",
+         "hashDocID": "15535642424675364572",
+         "exportId": "export/UzFfBgAAxKupTGNCTS-2k8zT4DCK7SdAz6KL0_8TbeptuVAulQ",
+         "title": "天空之境拍摄<em class=\"highlight\">剪辑</em>全过程#拍摄技巧#拍摄#<em class=\"highlight\">剪辑</em>教程#短<em class=\"highlight\">视频</em>创业@微信<em class=\"highlight\">创作</em>者 @微信<em class=\"highlight\">创作</em>者助手",
+         "pubTime": 1792337910,
+         "duration": "03:49",
+         "feedNonceId": "1761713016856792890",
+         "source": {
+          "title": "许许在广西"
+         }
+        },
+        {
+         "docID": "finderobjv0Tg59tUveUEjpeTxtXxuGAQn5UbDpEoN5fqXa0/FKgfY=",
+         "hashDocID": "12051950580638661727",
+         "exportId": "export/UzFfBgAAxJyqdHkuDCu2k8zT4DCK2i2n3ghbuBhgGTF03NsIhg",
+         "title": "...高级感拉满#干货分享#手机拍摄#<em class=\"highlight\">剪辑</em>教程#邪修出片指南#零基础学短<em class=\"highlight\">视频</em>@微信<em class=\"highlight\">视频创作</em>安全中心",
+         "pubTime": 1792336070,
+         "duration": "03:47",
+         "feedNonceId": "15261782098711990070",
+         "source": {
+          "title": "雯妈在安徽"
+         }
+        },
+        {
+         "docID": "finderobjv0SwkE2616FLawaiXl48hKW9dk9BWTatGP1EvYnqBsklM=",
+         "hashDocID": "14535127954484024010",
+         "exportId": "export/UzFfBgAAxM2QVCEubjG2k8zT4DCKdOdbxw7vx4bUIGWocoJRCQ",
+         "title": "实体获客<em class=\"highlight\">视频</em>如何3分钟做好\n获客型<em class=\"highlight\">视频</em>用AI做\n传灯型<em class=\"highlight\">视频</em>用心做#传灯行动#日更100天#人性的光辉@传灯行动",
+         "pubTime": 1792332539,
+         "duration": "00:47",
+         "feedNonceId": "11003668671384098500",
+         "source": {
+          "title": "陈先生I天津实体获客AI视频修行"
+         }
+        },
+        {
+         "docID": "finderobjv0Kq9qXXmB3F3OqaJpJvbNvVVrGibWDvTCHQp0E8yuGKc=",
+         "hashDocID": "17808936558226531417",
+         "exportId": "export/UzFfBgAAxNyoNAADXTO2k8zT4DCKGCpMSaiwy47zGq88I8sPbA",
+         "title": "5 个免费 AI <em class=\"highlight\">视频</em>生成工具实测：脸不崩手不歪，首尾帧自动补全，还有 200 万免费额度一次出 4 条。全免费，收藏逐个试。\n#AI<em class=\"highlight\">视频</em> #免费工具 #AIGC",
+         "pubTime": 1792331682,
+         "duration": "00:31",
+         "feedNonceId": "16612887312153009332",
+         "source": {
+          "title": "赵洋Joes"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

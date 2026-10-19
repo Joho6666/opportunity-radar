@@ -1,0 +1,173 @@
+{
+ "code": 200,
+ "data": {
+  "channel": "telegram",
+  "query": "video",
+  "backend": "web",
+  "scanned": 100,
+  "matched": 6,
+  "messages": [
+   {
+    "id": 411,
+    "channel": "telegram",
+    "url": "https://t.me/telegram/411",
+    "type": "text",
+    "date": "2025-10-14T16:09:25+00:00",
+    "text": "For all the features from this update, like Liquid Glass on iOS, improved gift interfaces and a new mini app for bug reports and feature suggestions – check out the full blog:\n\nhttps://telegram.org/blog/comments-in-video-chats-threads-for-bots\n\nOctober Features\n1 • 2 • 3 • 4 • More",
+    "text_html": "For all the features from this update, like <b>Liquid Glass</b> on iOS, <b>improved gift interfaces</b> and a new mini app for <b>bug reports</b> and<b> feature suggestions</b> –&nbsp;check out the full blog:<br><br><a href=\"https://telegram.org/blog/comments-in-video-chats-threads-for-bots\" target=\"_blank\" rel=\"noopener\">https://telegram.org/blog/comments-in-video-chats-threads-for-bots</a><br><br>October Features<br><a href=\"https://t.me/telegram/407\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">1</a> • <a href=\"https://t.me/telegram/408\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">2</a> • <a href=\"https://t.me/telegram/409\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">3</a> • <a href=\"https://t.me/telegram/410\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">4</a> •&nbsp;<b>More</b>",
+    "views": "3.58M",
+    "author": "Telegram News",
+    "is_forwarded": false,
+    "forwarded_from": null,
+    "reply_to": null,
+    "link_preview": {
+     "url": "https://telegram.org/blog/comments-in-video-chats-threads-for-bots",
+     "site_name": "Telegram",
+     "title": "Comments in Group Calls, Notes for Contacts, Suggested Birthdays and More",
+     "description": "In today's update we're launching live comments and reactions in group calls and video chats, notes for contacts, suggested birthdays, new ways to customize your profile colors — plus threaded chats and response streaming for AI bots, improvements for gifts…"
+    },
+    "media": {
+     "photos": [],
+     "videos": [],
+     "has_unsupported": false
+    },
+    "reactions": []
+   },
+   {
+    "id": 407,
+    "channel": "telegram",
+    "url": "https://t.me/telegram/407",
+    "type": "video",
+    "date": "2025-10-14T16:08:37+00:00",
+    "text": "Comments and Reactions in Group Calls. Participants in group calls and video chats can now send comments and reactions directly in the call interface.\n\nOctober Features\n1 • 2 • 3 • 4 • More",
+    "text_html": "<b>Comments and Reactions in Group Calls.</b> Participants in <a href=\"https://t.me/telegram/377\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">group calls</a> and <a href=\"https://t.me/telegram/147\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">video chats</a> can now <b>send comments</b> and reactions directly <b>in the call interface</b>.<br><br>October Features<br><b>1</b> • <a href=\"https://t.me/telegram/408\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">2</a> • <a href=\"https://t.me/telegram/409\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">3</a> • <a href=\"https://t.me/telegram/410\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">4</a> •&nbsp;<a href=\"https://t.me/telegram/411\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">More</a>",
+    "views": "1.87M",
+    "author": "Telegram News",
+    "is_forwarded": false,
+    "forwarded_from": null,
+    "reply_to": null,
+    "link_preview": null,
+    "media": {
+     "photos": [],
+     "videos": [
+      {
+       "url": "https://cdn1.telesco.pe/file/753bf98716.mp4?token=RPcBI0B1MElCyLmVEEOhwhU17X3d8vDQ3XfTXwGkSvjqxBpv8IlnP2FeY-9DGPvqiDkisari0_QH1C2UpxY0UHSbtIhDt_C9tSzZ2xxggzxVSKDviCiOL7smUYDdST61CprJEPXP31RaxzS_CudNwr1yfQqCXUyaWW2Cx8nt1aY2bnU7Lj1ZJ85AEwAbN6MKG-bgDPpDF0RtuVXjQg9JsgF_wrQF5bj_jWV6k5KSw7Wen5sUXjlR2V6W3cWU0x_HjTIdMdgUc2SvzOD-GjhN3edrZlczDxDL7hO3h703Qpwj5CoW9g_-o0Isel4Ht-EkF0EWoYz-AuMjN8zV5SPDdQ",
+       "thumb": "https://cdn1.telesco.pe/file/k36_eB2TiJ5J1lRjsllLJqOn2XnDQ2m7qum12DD6Iw-TEUsX61a_eI9apSzni7TocH4Q0xT12ZOoCQeIsZ6nDr5sim2Z3lgDPi6WBR-qlb47nnH5jAfxMnlhxFcRcQpFSPr6IZcuesoPMpxBUPEovmMAT5i-4ybpQDsdx1bA-gV_XLf_YEOukzoSbPuWeX7WWSFWMPoTadGdgmv0q4PotrcrijBskqxoZ26i2MMIKQPcsy34Mv9QPZuj42hngpXhjzE_mU8rBVDSRt-HyuA8eJ4v9324COqzhvWS0OPPAatskzK28bB9C28Sf2z0rmK_HK6ijirpCMOwTdLSWqJY-g",
+       "duration": "0:10"
+      }
+     ],
+     "has_unsupported": true
+    },
+    "reactions": []
+   },
+   {
+    "id": 384,
+    "channel": "telegram",
+    "url": "https://t.me/telegram/384",
+    "type": "video",
+    "date": "2025-05-13T13:35:31+00:00",
+    "text": "Post Several Stories at Once. The story editor now lets you select, edit and post multiple photos or videos at the same time.\n\nWhen posting a long video, the story editor now automatically splits the video into a series of stories.\n\nMay Features\n1 • 2 • 3 • 4 • More",
+    "text_html": "<b>Post Several Stories at Once.</b> The story editor now lets you select, edit and post <b>multiple photos</b> or <b>videos</b> at the <b>same time</b>.<br><br>When posting a <b>long video, </b>the story editor now <b>automatically splits </b>the<b> </b>video into a <b>series of stories</b>.<br><br>May Features<br><a href=\"https://t.me/telegram/382\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">1</a> •&nbsp;<a href=\"https://t.me/telegram/383\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">2</a> •&nbsp;<b>3</b> •&nbsp;<a href=\"https://t.me/telegram/385\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">4</a> •&nbsp;<a href=\"https://t.me/telegram/386\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">More</a>",
+    "views": "2.02M",
+    "author": "Telegram News",
+    "is_forwarded": false,
+    "forwarded_from": null,
+    "reply_to": null,
+    "link_preview": null,
+    "media": {
+     "photos": [],
+     "videos": [
+      {
+       "url": "https://cdn1.telesco.pe/file/d0c1684ec2.mp4?token=TreeOpisFNYySJDaguqXtbLEMBwVP60I60B4NsAU9F6GO-cvEY1e_ttE-JmnsLcWIhcdLZDe4_42a-N0kwywqwz6oPTlG3VXV05fgdKdAHE400uDVfT2_LmqOcrLqkaL3l8DwPAHcU4V4AdTkfjVrMBHbJ4rrjO7Qg2yhmqoSbzfQ8N-Qu-9p0ipdHE7TaDN7aM0Riy6E7qJmLqFIiyBaRwUeIJTUrQLaNes45grYnXTl7Uc1ipak5r1hudWRSoOTsxrjFsfLi8jsDaGFPsvusz8BlcV2VMYf4-ei3dDWMKlNVdWcAlPEYA1jYNbAf-pKLG3gRxP-zh7BwTk23aO7g",
+       "thumb": "https://cdn1.telesco.pe/file/RKucmxV4O4mThLfIFf_fMiKhFHyClQv24b46ZA-0S6WesIm_RAhzc9283vtRJQvGxwY_9kcEIXf-WxyfqlC7nZiQIVpaH1RNkyetcBNxVK09fNZI82gYtdV8pMxuZoZNQ_JEiUL_yUSSeTIXm46MbE3g1mnVd88mZ0zWXfz_NxcEYMl-RoZX3AsImr1x0QO5sibsrOvngBn5LY4nUAy9aByAM8q2NSF6R_RSlSi5Ykcmzyg6GJRyJrmx4_RG_-qiqoc2aHf7zb4hnVhZbNqRquFxVyEgeWgjq-6AHLoyJBwYoGw3oBSS64YdKQshs-HwLL8P493fpvre72PyK0pWsw",
+       "duration": "0:13"
+      }
+     ],
+     "has_unsupported": true
+    },
+    "reactions": []
+   },
+   {
+    "id": 371,
+    "channel": "telegram",
+    "url": "https://t.me/telegram/371",
+    "type": "text",
+    "date": "2025-02-14T13:56:47+00:00",
+    "text": "For all the features from this update, like reacting with Stars as a channel or setting cover photos for videos – check out our blog: https://telegram.org/blog/AI-sticker-search-video-improvements\n\nFebruary Features\n1 • 2 • 3 • 4 • More",
+    "text_html": "For all the features from this update, like reacting with Stars <b>as a channel</b> or setting <b>cover photos</b> for videos – check out our blog: <a href=\"https://telegram.org/blog/AI-sticker-search-video-improvements\" target=\"_blank\" rel=\"noopener\">https://telegram.org/blog/AI-sticker-search-video-improvements</a><br><br>February Features<br><a href=\"https://t.me/telegram/367\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">1</a> •&nbsp;<a href=\"https://t.me/telegram/368\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">2</a> • <a href=\"https://t.me/telegram/369\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">3</a> •&nbsp;<a href=\"https://t.me/telegram/370\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">4</a> •&nbsp;<b>More</b>",
+    "views": "4.4M",
+    "author": "Telegram News",
+    "is_forwarded": false,
+    "forwarded_from": null,
+    "reply_to": null,
+    "link_preview": {
+     "url": "https://telegram.org/blog/AI-sticker-search-video-improvements",
+     "site_name": "Telegram",
+     "title": "AI-Powered Sticker Search, Improved Videos and More",
+     "description": "Today's update lets you search millions of stickers with AI, copy video links at the current time, set cover photos for videos, react with Stars as your channel browse similar bots -- and more."
+    },
+    "media": {
+     "photos": [],
+     "videos": [],
+     "has_unsupported": false
+    },
+    "reactions": []
+   },
+   {
+    "id": 369,
+    "channel": "telegram",
+    "url": "https://t.me/telegram/369",
+    "type": "video",
+    "date": "2025-02-14T13:56:16+00:00",
+    "text": "Saved Progress for Videos. Videos you watch now automatically save your progress – so you can return exactly where you left off.\n\nFebruary Features\n1 • 2 • 3 • 4 • More",
+    "text_html": "<b>Saved Progress for Videos.</b> Videos you watch now automatically <b>save your progress </b>–&nbsp;so you can return exactly where you left off.<br><br>February Features<br><a href=\"https://t.me/telegram/367\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">1</a> •&nbsp;<a href=\"https://t.me/telegram/368\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">2</a> • <b>3</b> •&nbsp;<a href=\"https://t.me/telegram/370\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">4</a> •&nbsp;<a href=\"https://t.me/telegram/371\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">More</a>",
+    "views": "2.46M",
+    "author": "Telegram News",
+    "is_forwarded": false,
+    "forwarded_from": null,
+    "reply_to": null,
+    "link_preview": null,
+    "media": {
+     "photos": [],
+     "videos": [
+      {
+       "url": "https://cdn1.telesco.pe/file/a8c773cf7e.mp4?token=hA9bJ6LZ-RPmMM0Kd2t1awu2o4LgoGbrDV8Q-9m_xP2WPMxbE5OWZwLSfRamCSZjpFPHY8LsoL7Sf2yPm-o--QxYW9UzOL9xDL7L-8ZVLz5Ygyq4x3FA5iljnHiFrAdY4-Xpix8KMExVcKzUPVWwXh4z4vugvULMSBbMgmUkkDtQQpSsqxNliWXk2XuZVwUx2drHyVd-GR00Un7xwS_7nTu0VcUxBn0Iz91NE2WqC81iE72S1AEGy1_3tbwWyGreVUTDlmxLzP_S3oYhvr6T0g4oYzNwudz5_bEvbkZLSzyhZ0SNZCMT1q1Q1EvSeKaoI-Z7_6SFtPhAhKX534YWFg",
+       "thumb": "https://cdn1.telesco.pe/file/TDRAU1ZxA6_sGcwEpNUrQqA5SmkmFeSd1ME-E4OiUBdJZnsmElTTDMIEW3P0NYYHFfV1GrXbXbl37y1y8hZuy6Dm3mqzA7dFO-mZOkAwyUTd55lIa4F6pNUPFQSmnnVMZ9CXL26eDwAx2OePBBhifqIGowG1TqRah7N8GQXWJrmQ9rTsOBdi_EiyDpBxj9KbluHAWInV7hyzvVdxxZA3eA9MdjjDB0jdtZowbdBUC8HRHQRfy23Gy6-rxUgwj_nF9E6FVrQP0vrxTb-PFnnaNdYn05rKSBFPsaRFkl_BXYqIYDwiKDpeUzd6d2XiEfcd6NvtWZLcybA8cDbCZk3xWQ",
+       "duration": "0:04"
+      }
+     ],
+     "has_unsupported": true
+    },
+    "reactions": []
+   },
+   {
+    "id": 368,
+    "channel": "telegram",
+    "url": "https://t.me/telegram/368",
+    "type": "video",
+    "date": "2025-02-14T13:56:04+00:00",
+    "text": "Timestamp Links. When sharing a link to a video in Telegram, you can include the current timestamp in the link.\n\nFebruary Features\n1 • 2 • 3 • 4 • More",
+    "text_html": "<b>Timestamp Links.</b> When sharing a link to a video in Telegram, you can include the <b>current timestamp</b> in the link.<br><br>February Features<br><a href=\"https://t.me/telegram/367\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">1</a> •&nbsp;<b>2</b> • <a href=\"https://t.me/telegram/369\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">3</a> •&nbsp;<a href=\"https://t.me/telegram/370\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">4</a> •&nbsp;<a href=\"https://t.me/telegram/371\" target=\"_blank\" rel=\"noopener\" onclick=\"return confirm('Open this link?\\n\\n'+this.href);\">More</a>",
+    "views": "2.45M",
+    "author": "Telegram News",
+    "is_forwarded": false,
+    "forwarded_from": null,
+    "reply_to": null,
+    "link_preview": null,
+    "media": {
+     "photos": [],
+     "videos": [
+      {
+       "url": "https://cdn1.telesco.pe/file/cf7f642a7e.mp4?token=ITvNnYXMSQI4qJCiINSG3L0PNHGGnBpE1thoFT58Ez40f-aYmO735SsTM0PZ4aUwAwrbPQpawRmZYUAIOKUhtEHXulNdYcTeihVNQGxl9EveXPdxWMPglacKcAtDOSmh9_W7D-ywc1ujojOyecO-JW7oXYwXmnBI_DAmpuOyiZ824XrKXDZZFSHTtepf9nH4xFczyfHfyyDxvHqDK2zhGgmeQeu7lg2zsSs63dSGr5XM1lNbvkV75qWSFy2HUZat7PIePU1oAm5A77KyJZtF07v-ukAcDJupaN-8cBgci04LD8hJ3OEAxieBgk3y1FziJ2IE_zKw7aBXuM3N5hjyAQ",
+       "thumb": "https://cdn1.telesco.pe/file/bbskK0mQaACtKDO3hMb3PccI2Z4RAEH4jzrZtjQ_mHj1rlhQfnewy_BNrXpEB3tl09OhU9gHDCKFQmAz0d6jCyEtYjBzk5sy5yJCJP3rAtW570yDYDbH1DWbKPmZEy4fdPct7GKXv3no3OHoxm288ecum_Mes-NOawqSazoMHVLPXBPUSzYS4dvAAPWM006YHXPtKpPWAUdInjegH53OIGmrsRqFM7ujM2RorHIqLizVo3Y9tqXDfJl3rleDgkRJxe2Yn8AGrx9op3XNhhcp3Tx1BaMz2d-TIrzah1rqv0Seg-QvmBJnboYb52tp2ZUGpsAlcd41UT1z1MY8wXzXwg",
+       "duration": "0:18"
+      }
+     ],
+     "has_unsupported": true
+    },
+    "reactions": []
+   }
+  ],
+  "note": "网页预览无原生搜索，此为近期历史的尽力过滤；完整搜索需启用 MTProto 后端"
+ }
+}

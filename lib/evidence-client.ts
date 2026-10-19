@@ -58,7 +58,7 @@ export type EvidenceBatchResult = {
   records: EvidenceRecord[];
 };
 
-export const EVIDENCE_SOURCES = ["rss", "douyin", "xiaohongshu", "weibo", "zhihu", "tikhub", "hackernews", "github", "web_search"] as const;
+export const EVIDENCE_SOURCES = ["rss", "douyin", "xiaohongshu", "weibo", "zhihu", "tikhub", "bilibili", "kuaishou", "lemon8", "pipixia", "threads", "twitter", "youtube", "wechat_search", "hackernews", "github", "web_search"] as const;
 export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
 export const SOURCE_LABELS: Record<EvidenceSource, string> = {
   rss: "RSS（含 V2EX）",
@@ -67,12 +67,20 @@ export const SOURCE_LABELS: Record<EvidenceSource, string> = {
   weibo: "微博",
   zhihu: "知乎",
   tikhub: "TikTok",
+  bilibili: "哔哩哔哩",
+  kuaishou: "快手",
+  lemon8: "Lemon8",
+  pipixia: "皮皮虾",
+  threads: "Threads",
+  twitter: "X / Twitter",
+  youtube: "YouTube",
+  wechat_search: "微信搜一搜",
   hackernews: "Hacker News",
   github: "GitHub",
   web_search: "网页搜索",
 };
 /** Sources billed per call (TikHub, Firecrawl); the API refuses them without manual confirmation. */
-export const BILLABLE_SOURCES: ReadonlySet<EvidenceSource> = new Set(["douyin", "xiaohongshu", "weibo", "zhihu", "tikhub", "web_search"]);
+export const BILLABLE_SOURCES: ReadonlySet<EvidenceSource> = new Set(["douyin", "xiaohongshu", "weibo", "zhihu", "tikhub", "bilibili", "kuaishou", "lemon8", "pipixia", "threads", "twitter", "youtube", "wechat_search", "web_search"]);
 /** Free domestic feeds worth polling for paid work. */
 export const FEED_PRESETS = [
   { label: "V2EX 外包", url: "https://www.v2ex.com/feed/outsourcing.xml" },
@@ -88,6 +96,8 @@ export const KEYWORD_PRESETS: { group: string; source: EvidenceSource; query: st
   {group:"企业视频与开发",source:"xiaohongshu",query:"找人制作商品宣传片"},
   {group:"企业视频与开发",source:"xiaohongshu",query:"找人开发小程序"},
   {group:"企业视频与开发",source:"weibo",query:"找人做网站"},
+  {group:"企业视频与开发",source:"bilibili",query:"找人剪视频"},
+  {group:"企业视频与开发",source:"wechat_search",query:"找人做视频"},
 ];
 export type CollectionAttempt = { fingerprint: string; requestId: string };
 export function collectionAttempt(previous: CollectionAttempt | null, source: EvidenceSource, query: string, cursor?: string, batchId?: string, configKey?: string): CollectionAttempt {

@@ -1,0 +1,13 @@
+{
+ "source": "父代理 2026-10-18 真实 TikHub 调用记录（本轮不重复付费）",
+ "platform": "douyin",
+ "endpoint": "/api/v1/douyin/search/fetch_video_search_v3",
+ "verified_at": "2026-10-18",
+ "calls": [
+  {"query": "找拍摄", "returned": 8},
+  {"query": "家居", "returned": 1000},
+  {"query": "家居 找视频拍摄", "returned": 0},
+  {"query": "圣诞 视频 制作 求推荐", "returned": 0}
+ ],
+ "conclusion": "长短语含城市/修饰词时抖音召回为 0；核心 2–4 字短词可召回。截短规则据此实现，未在本轮重新调用。"
+}

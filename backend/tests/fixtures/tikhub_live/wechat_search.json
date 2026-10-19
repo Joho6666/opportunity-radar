@@ -1,0 +1,71 @@
+{
+ "code": 200,
+ "data": {
+  "business_type": 2,
+  "total": 148,
+  "no_more": null,
+  "categories": null,
+  "results": {
+   "data": [
+    {
+     "type": 2,
+     "count": 36,
+     "totalCount": 148,
+     "items": [
+      {
+       "title": "2026年，呆头鹅<em class=\"highlight\">视频剪辑</em>免费软件，6分钟如何剪辑1小时视频",
+       "desc": "【场景二：长<em class=\"highlight\">视频剪辑</em>】 对于需要剪辑的长视频，呆头鹅免费软件同样适用。视频分割：将长视频分割成多个片段。选择性剪辑：选择你认为重要的片段进行剪辑。",
+       "date": 1792170582,
+       "docID": "9942943906819879871",
+       "docType": 0,
+       "itemShowType": 0,
+       "mpScene": 7,
+       "src_type": 49,
+       "timestamp": 1792170582,
+       "doc_url": "http://mp.weixin.qq.com/s?__biz=Mzk5MDg1NjI1Ng==&mid=2247490955&idx=1&sn=0f18237d31e97f13c3dab188907eab58&chksm=c4b543154bc6a678a81c25dfe1c474f119695882e2894aa0fc185ce6630d1e71f0e3873d79e8#rd",
+       "source": {
+        "title": "呆头鹅Ai矩阵获客系统",
+        "dateTime": "7分钟前"
+       }
+      },
+      {
+       "title": "2026年必看！呆头鹅直播<em class=\"highlight\">剪辑</em>，8分钟轻松<em class=\"highlight\">剪辑</em>3小时<em class=…",
+       "desc": "快来尝试呆头鹅AI直播剪辑软件，让你的<em class=\"highlight\">视频剪辑</em>变得轻松高效！【下载地址】：https：//p18pi3jpivv.feishu.cn/wiki/KqgKwTbxIikFhQk6DxjcMd9hnCg？fro…",
+       "date": 1792170427,
+       "docID": "9649865780663399367",
+       "docType": 0,
+       "itemShowType": 0,
+       "mpScene": 7,
+       "src_type": 49,
+       "timestamp": 1792170427,
+       "doc_url": "http://mp.weixin.qq.com/s?__biz=Mzk2ODAwOTA3Mw==&mid=2247490935&idx=1&sn=701dc443f38b33b76c0f0439adc605a1&chksm=c5e84a59f59feebd99a69bcac321dbe81c4a70965a4bc9b07d7cb947a8518d8fb99166830f74#rd",
+       "source": {
+        "title": "呆头鹅电商开店教学",
+        "dateTime": "9分钟前"
+       }
+      },
+      {
+       "title": "<em class=\"highlight\">视频</em>画中画，这样添加更简单",
+       "desc": "第一步：打开蓬勃工具箱，进入<em class=\"highlight\">视频编辑</em>模块 打开蓬勃工具箱小程序首页，找到视频加水印入口，进入素材工坊页面。第二步：上传主视频素材在工坊页面，点击【点击上传视频】，选中你要编辑的视频进行上传。",
+       "date": 1792156226,
+       "docID": "8533320525596688924",
+       "docType": 0,
+       "itemShowType": 0,
+       "mpScene": 7,
+       "src_type": 49,
+       "timestamp": 1792156226,
+       "doc_url": "http://mp.weixin.qq.com/s?__biz=MzcwMzQ2MzgxMg==&mid=2247483874&idx=1&sn=87bb515ed837986b693d871c922a7152&chksm=f57ca4dc3e5c354462c5d2428822db9ca471577830849c8eebf3589c32152f733e8c128a6368#rd",
+       "source": {
+        "title": "蓬勃办公工具箱",
+        "dateTime": "4小时前"
+       }
+      }
+     ]
+    }
+   ],
+   "offset": 36,
+   "pageNumber": 1,
+   "query": "视频制作"
+  }
+ }
+}

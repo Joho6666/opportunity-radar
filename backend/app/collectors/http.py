@@ -108,7 +108,13 @@ class HttpFetcher:
                     if reservation:
                         body_args = kwargs.get("json") or {}
                         query = body_args.get("keyword") or body_args.get("query") or response.request.url.params.get("keyword") or response.request.url.params.get("query")
-                        archive_response(reservation, response, query)
+                        try:
+                            archive_response(reservation, response, query)
+                        except Exception:
+                            # The paid call already happened; a failed archive must not
+                            # block the collector or leak a "reserved" ledger row.
+                            import logging
+                            logging.getLogger(__name__).exception("provider response archive failed", extra={"url": urlparse(url).path})
                         try:
                             reported=response.json()
                         except ValueError:

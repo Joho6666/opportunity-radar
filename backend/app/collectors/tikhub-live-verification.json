@@ -1,0 +1,234 @@
+{
+ "source": "direct paid verification calls against api.tikhub.io with official calculate_price receipts",
+ "verified_at": "2026-10-16",
+ "method": "每个端点先调用官方 calculate_price（request_per_day=1）记录精确单价，再做 1 次真实搜索；失败端点最多 3 次尝试；无翻页、无评论、无私信。响应以去密钥形式保存在本机 scratch（tikhub-verify-20261016），仓库内仅保存裁剪后的契约 fixture。",
+ "notes": "request_id 为 TikHub 响应报文里的官方请求标识；billing 走既有计费网关，本目录只记录验证证据，不触发任何调用。",
+ "platforms": {
+  "xiaohongshu": {
+   "endpoint": "/api/v1/xiaohongshu/app_v2/search_notes",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "3ec5daef-91d2-4edd-9afd-8e786b119308",
+   "evidence": "应用内计费网关真实调用（provider_responses 已存响应可解析）；此前多轮真实搜索/正文验证。",
+   "fixture": null
+  },
+  "weibo": {
+   "endpoint": "/api/v1/weibo/web_v2/fetch_realtime_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "68a3ebf4-6255-4cc5-82fe-7fcff3f8116f",
+   "evidence": "data.parsed_data.results[]：weibo_id/user_nick/content/post_url/publish_time（中文相对时间）/interaction 计数。",
+   "fixture": "backend/tests/fixtures/tikhub_live/weibo_search.json"
+  },
+  "zhihu": {
+   "endpoint": "/api/v1/zhihu/web/fetch_article_search_v3",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "9178063e-d3dd-4e41-ba13-cdadbe7fdc38",
+   "evidence": "data.data[]：type=search_result、object.id/type(article|answer|question)/title/excerpt/content/created_time/author.name。",
+   "fixture": "backend/tests/fixtures/tikhub_live/zhihu_search.json"
+  },
+  "douyin": {
+   "endpoint": "/api/v1/douyin/search/fetch_video_search_v3",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "90baba24-bb91-4b2a-a6bb-55dac523c385",
+   "evidence": "v1 历史 400；v3 成功 1000 条：data.data[].itemId/title/url/likes/nickname/fans/createTime(北京字符串)。createTime 时区用 /api/v1/douyin/web/fetch_one_video（1791886783=10-13T10:19:43Z）交叉核对为 UTC+8。v5 亦可用（items[].aweme_info，混合老内容、无时间档），未选作主端点。",
+   "extra_request_ids": {
+    "v5": "9a3c7c2e-208b-4857-9898-d2bc26bae38c",
+    "detail_crosscheck": "76ee514a-7eff-4944-8136-ebd2233f689c"
+   },
+   "fixture": "backend/tests/fixtures/tikhub_live/douyin_v3_search.json"
+  },
+  "tikhub": {
+   "endpoint": "/api/v1/tiktok/web/fetch_general_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "5ae034a7-0fea-4260-b31d-4e76e0766faa",
+   "evidence": "data.data[].item：id/desc/createTime/author.uniqueId/author.nickname/stats.diggCount 等；分页 cursor/has_more。",
+   "fixture": "backend/tests/fixtures/tikhub_live/tiktok_search.json"
+  },
+  "reddit": {
+   "endpoint": "/api/v1/reddit/app/fetch_dynamic_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "1ffb48a8-4c26-4122-b22b-2e6ffe2db2a2",
+   "evidence": "data.children[].post：id(t3_*)/postTitle/createdAt(ISO+0000)/content.markdown/permalink/score/commentCount/authorInfo.name/subreddit.prefixedName；pageInfo.hasNextPage。原生时间档 time_range=day/week/month 实测生效。",
+   "extra_request_ids": {
+    "day_range_check": "67403e62-6e10-4f4d-9c01-d7df4a06ed29"
+   },
+   "fixture": "backend/tests/fixtures/tikhub_live/reddit_search.json"
+  },
+  "bilibili": {
+   "endpoint": "/api/v1/bilibili/web/fetch_general_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "d326ec57-f7b6-4173-b3af-b9e51e1452ce",
+   "evidence": "data.data.result[]：type=video/bvid/aid/title/description/author/mid/arcurl/pubdate(epoch)/play/video_review/favorites/like/review/duration。原生时间窗口 pubtime_begin_s/pubtime_end_s 实测生效（168h 窗口内按 pubdate 倒序）。",
+   "extra_request_ids": {
+    "window_check": "d5251593-7cad-4fb4-886c-e9beeafa8787"
+   },
+   "fixture": "backend/tests/fixtures/tikhub_live/bilibili_search.json"
+  },
+  "kuaishou": {
+   "endpoint": "/api/v1/kuaishou/app/search_video_v2",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "733af060-94de-4c11-b46d-5774029b583f",
+   "evidence": "data.mixFeeds[].feed：photo_id/caption(captionToComment)/timestamp(毫秒)/duration/like_count/view_count/comment_count/share_count/user_name/user_id；data.pcursor 翻页游标。",
+   "fixture": "backend/tests/fixtures/tikhub_live/kuaishou_search.json"
+  },
+  "lemon8": {
+   "endpoint": "/api/v1/lemon8/app/fetch_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "60d34aab-eda1-4322-847b-d2fdc3242c85",
+   "evidence": "data 为多帧数组；含 data.items[] 的帧内：item_id/title/content/description/publish_time/author.name/share_url/article_url/like_count 等。",
+   "fixture": "backend/tests/fixtures/tikhub_live/lemon8_search.json"
+  },
+  "pipixia": {
+   "endpoint": "/api/v1/pipixia/app/fetch_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "a93003af-e4e8-4908-876b-12693ab51eb1",
+   "evidence": "data.data.data[]（cell）内 item：item_id/item_id_str/content/create_time/duration/author.name/stats 计数/share.share_url。",
+   "fixture": "backend/tests/fixtures/tikhub_live/pipixia_search.json"
+  },
+  "threads": {
+   "endpoint": "/api/v1/threads/web/search_posts",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "64d8fd4c-a3c0-4a48-bea6-c488f508d1c6",
+   "evidence": "data.results[].node.thread.thread_items[].post：pk/id/code/caption.text/like_count/taken_at/user.username；data.cursor。",
+   "fixture": "backend/tests/fixtures/tikhub_live/threads_search.json"
+  },
+  "twitter": {
+   "endpoint": "/api/v1/twitter/web/fetch_search_timeline",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "14e329b0-1ede-4440-96f1-f142e2439b41",
+   "evidence": "data.timeline[].type=tweet：tweet_id/screen_name/text/created_at(Twitter 格式)/favorites/retweets/replies/quotes/views/user_info.name；next_cursor。",
+   "fixture": "backend/tests/fixtures/tikhub_live/twitter_search.json"
+  },
+  "youtube": {
+   "endpoint": "/api/v1/youtube/web_v2/get_general_search_v2",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "3f73848f-5965-4c40-9685-5dec1fe4ad0c",
+   "evidence": "data.videos[]：video_id/title/duration/view_count(字符串)/published_time(相对文本，按保守上限换算)/author/url/description_snippet；另有 shorts/channels/playlists 分区。原生档位 upload_date=last_hour/today/this_week/this_month/this_year 与 type=video 实测生效。",
+   "extra_request_ids": {
+    "upload_date_check": "54ac3ba0-bc2a-4a06-92af-d8ff3cdd9b22"
+   },
+   "fixture": "backend/tests/fixtures/tikhub_live/youtube_search.json"
+  },
+  "wechat_search": {
+   "endpoint": "/api/v1/wechat_search/v2/fetch_search",
+   "status": "verified",
+   "verified_at": "2026-10-16",
+   "request_id": "f76ed124-99cb-465f-b978-af9df673ec13",
+   "evidence": "data.total 与 data.results.data[].items[]（文章：title/desc 含 <em> 高亮/docID/doc_url/timestamp/source.title/source.dateTime）；视频垂类帧结构为 data.results.data[].subBoxes[].items[]（docID/exportId/pubTime/duration/source.title，无 doc_url）。2026-10-18 追加两次真实调用：article（publish_time=week，35 条全部在 7 天内，证明原生时间档生效）与 video（total=251，首屏 10 条无原文链接）。",
+   "fixture": "backend/tests/fixtures/tikhub_live/wechat_search.json",
+   "verticals": {
+    "article": {
+     "status": "verified",
+     "verified_at": "2026-10-18",
+     "request_id": "c35c7a4a-3e98-46da-bfed-95c0fcc9905e",
+     "keyword": "找人做视频",
+     "business_type": "article",
+     "sort": "latest",
+     "publish_time": "week",
+     "total": 35,
+     "parsed": 35,
+     "rows": 35,
+     "fields": "title/docID/doc_url/timestamp/source.title/source.dateTime",
+     "evidence": "35 条全部解析出标题/公众号名/发布时间/原文链接；发布时间 0.11–6.68 天，publish_time=week 原生档生效。"
+    },
+    "video": {
+     "status": "verified",
+     "verified_at": "2026-10-18",
+     "request_id": "39e3aaec-3344-4114-95e4-bef1647fb045",
+     "keyword": "求视频制作",
+     "business_type": "video",
+     "sort": "latest",
+     "publish_time": "all",
+     "total": 251,
+     "rows": 10,
+     "parsed": 1,
+     "fields": "docID/hashDocID/exportId/pubTime/duration/source.title/title → detail.id/description/nickname/create_time → share_url",
+     "share_url": "https://weixin.qq.com/sph/A6BpEUvSmC",
+     "detail_request_id": "f16cd41b-bb08-4812-9c07-b6a8d5eb23af",
+     "share_request_id": "5504d38b-26a3-4778-8415-2ae62ff8f120",
+     "object_id": "15035255076854700671",
+     "failed_hashdocid_request_id": "79888fb2-2b24-4318-a174-91a161f518e0",
+     "reason": "搜索行没有 doc_url，但可用 exportId 取详情得到纯数字 object_id，再生成 weixin.qq.com/sph/ 短链。hashDocID 直接当 object_id 会返回 share_url=null，不能省掉详情调用。每条额外 2 次付费调用（详情 + 分享链），单条约 30 秒。"
+    }
+   },
+   "native_time_verified": true,
+   "native_time_evidence": "article 调用使用 publish_time=week，35/35 条发布时间在 7 天内（最旧 6.68 天），官方时间档被真实响应验证。"
+  },
+  "instagram": {
+   "endpoint": "/api/v1/instagram/v2/search_reels",
+   "status": "not_applicable",
+   "verified_at": "2026-10-16",
+   "reason": "接口三度实测（含官方示例参数 keyword=cat）均返回 HTTP 400『请求失败，请重试』，未扣费；当前无法获得任何响应字段，未强行接通。",
+   "attempts": [
+    {
+     "request_id": "ca4bf51c-fdc2-4c30-b3fe-dbe992609d3e",
+     "http_status": 400,
+     "params": {
+      "keyword": "video editing"
+     }
+    },
+    {
+     "request_id": "695b9bea-91f8-4266-a3bc-2176352f7624",
+     "http_status": 400,
+     "params": {
+      "keyword": "video editing"
+     }
+    },
+    {
+     "request_id": "4f169873-35c8-40a6-98fc-ef6526d9fdcf",
+     "http_status": 400,
+     "params": {
+      "keyword": "cat"
+     }
+    }
+   ],
+   "fixture": null
+  },
+  "xigua": {
+   "endpoint": "/api/v1/xigua/app/v2/search_video",
+   "status": "not_applicable",
+   "verified_at": "2026-10-16",
+   "reason": "三次实测（含官方示例参数 keyword=抖音&order_type=play_count）上游 return_count 均为 0、list_length=0、is_empty_content=true：接口成功但拿不到任何条目，未强行接通。",
+   "attempts": [
+    {
+     "request_id": "be511105-5e1c-41bf-aeb0-44b64590d830",
+     "http_status": 200,
+     "params": {
+      "keyword": "视频制作",
+      "order_type": "publish_time"
+     }
+    },
+    {
+     "request_id": "512574a7-8c81-48a5-a5b8-42a87466b1b6",
+     "http_status": 200,
+     "params": {
+      "keyword": "视频制作"
+     }
+    },
+    {
+     "request_id": "7b768565-9878-41ea-971d-561e1173ff07",
+     "http_status": 200,
+     "params": {
+      "keyword": "抖音",
+      "order_type": "play_count",
+      "min_duration": 1,
+      "max_duration": 180
+     }
+    }
+   ],
+   "fixture": null
+  }
+ }
+}

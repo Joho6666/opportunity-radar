@@ -1,0 +1,98 @@
+{
+ "code": 200,
+ "data": {
+  "cursor": "40f645c3a8184853abaad90133f4e5c3:1",
+  "results": [
+   {
+    "cursor": "",
+    "node": {
+     "__typename": "XDTSearchThread",
+     "thread": {
+      "id": "4009256930203649015",
+      "thread_type": "thread",
+      "thread_items": [
+       {
+        "post": {
+         "pk": "4009256930203649015",
+         "id": "4009256930203649015_63658968001",
+         "code": "Dejve-iD8P3",
+         "caption": {
+          "text": "I’m looking for a video editor with minimal motion graphics experience.\nNo matter if you work with Ai tools or any editing software, or have…"
+         },
+         "like_count": 12,
+         "taken_at": 1792160692,
+         "media_type": 19,
+         "user": {
+          "pk": "63658968001",
+          "id": "63658968001",
+          "username": "kartik.does"
+         }
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "cursor": "",
+    "node": {
+     "__typename": "XDTSearchThread",
+     "thread": {
+      "id": "4009303620492165788",
+      "thread_type": "thread",
+      "thread_items": [
+       {
+        "post": {
+         "pk": "4009303620492165788",
+         "id": "4009303620492165788_44478418736",
+         "code": "Dej6GaQH4Kc",
+         "caption": {
+          "text": "Any freelance short form reel editors? Eg: editing my iphone video footages into a reel with subtitles. Please drop your price and portfolio…"
+         },
+         "like_count": 12,
+         "taken_at": 1792166257,
+         "media_type": 19,
+         "user": {
+          "pk": "44478418736",
+          "id": "44478418736",
+          "username": "puiyaan"
+         }
+        }
+       }
+      ]
+     }
+    }
+   },
+   {
+    "cursor": "",
+    "node": {
+     "__typename": "XDTSearchThread",
+     "thread": {
+      "id": "4009216048834350579",
+      "thread_type": "thread",
+      "thread_items": [
+       {
+        "post": {
+         "pk": "4009216048834350579",
+         "id": "4009216048834350579_63481784632",
+         "code": "DejmMEykQ3z",
+         "caption": {
+          "text": "Looking for an experienced video editor! 🎬\n\nSomeone with a modern, dynamic editing style who can handle corporate event recaps, heavy footag…"
+         },
+         "like_count": 17,
+         "taken_at": 1792155818,
+         "media_type": 19,
+         "user": {
+          "pk": "63481784632",
+          "id": "63481784632",
+          "username": "icaro.rdz"
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  ]
+ }
+}

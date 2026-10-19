@@ -1,0 +1,119 @@
+{
+ "code": 200,
+ "data": [
+  {
+   "message": "success",
+   "data": null,
+   "server_time": "1792170987.24",
+   "code": 0,
+   "result_status": 2
+  },
+  62,
+  {
+   "ack": -1,
+   "impr_id": "7697315624103708941",
+   "reason": "provider_data_dissatisfy",
+   "compare_info": null
+  },
+  {
+   "message": "success",
+   "data": {
+    "items": [
+     {
+      "item_id": "7458665034407871019",
+      "group_id": "7458665034407871019",
+      "media_id": "6915568532052198405",
+      "title": "How to edit on capcut and go viral on tiktok 🌸🤍🫶",
+      "content": "<p><a class=\"l8editor-forum\" data-type=\"forum\" data-name=\"#capcuthacks\" data-id=\"7353027988382924805…",
+      "description": "How to edit on capcut and go viral on tiktok 🌸🤍🫶",
+      "short_content": "#capcuthacks   #capcut edit   #capcuttrend   #editing",
+      "publish_time": 1736605814,
+      "behot_time": 0,
+      "display_time": 0,
+      "like_count": 3337,
+      "comment_count": 74,
+      "share_count": 0,
+      "repost_count": 0,
+      "read_count": 128105,
+      "favorite_count": 3325,
+      "digg_count": 3337,
+      "share_url": "https://www.lemon8-app.com/@malarialexis/7458665034407871019?user_id=7262344915936658478",
+      "article_url": "https://www.lemon8-app.com/@malarialexis/7458665034407871019?user_id=7262344915936658478",
+      "display_url": "https://www.lemon8-app.com/@malarialexis/7458665034407871019?user_id=7262344915936658478",
+      "article_class": "Video",
+      "search_item_type": "article",
+      "language": "en",
+      "author": {
+       "name": "MALARIALEXIS",
+       "author_id": "6915568532052198405",
+       "user_unique_name": "malarialexis"
+      }
+     },
+     {
+      "item_id": "7445818307724263982",
+      "group_id": "7445818307724263982",
+      "media_id": "7151962191633007658",
+      "title": "Learn how to edit in CapCut 1",
+      "content": "<p><a class=\"l8editor-forum\" data-type=\"forum\" data-name=\"#howtoedit \" data-id=\"7215625622691971078\"…",
+      "description": "Learn how to edit in CapCut 1",
+      "short_content": "#howtoedit   #capcut   #pink   #contentcreator",
+      "publish_time": 1733614758,
+      "behot_time": 0,
+      "display_time": 0,
+      "like_count": 5938,
+      "comment_count": 213,
+      "share_count": 1,
+      "repost_count": 0,
+      "read_count": 231661,
+      "favorite_count": 5413,
+      "digg_count": 5938,
+      "share_url": "https://www.lemon8-app.com/@dominiquedarcell/7445818307724263982?user_id=7262344915936658478",
+      "article_url": "https://www.lemon8-app.com/@dominiquedarcell/7445818307724263982?user_id=7262344915936658478",
+      "display_url": "https://www.lemon8-app.com/@dominiquedarcell/7445818307724263982?user_id=7262344915936658478",
+      "article_class": "Video",
+      "search_item_type": "article",
+      "language": "en",
+      "author": {
+       "name": "Dominique",
+       "author_id": "7151962191633007658",
+       "user_unique_name": "dominiquedarcell"
+      }
+     },
+     {
+      "item_id": "7218767626221355525",
+      "group_id": "7218767626221355525",
+      "media_id": "7445007481832637486",
+      "title": "Are edits a thing on here? 💭 ",
+      "content": "<p>Fun fact about me- I’ve been making “fanvids” since I was 12 (I just turned 31)</p><p class=\"l8ed…",
+      "description": "Are edits a thing on here? 💭 ",
+      "short_content": "Fun fact about me- I’ve been making “fanvids” since I was 12 (I just turned 31) …",
+      "publish_time": 1680750353,
+      "behot_time": 0,
+      "display_time": 0,
+      "like_count": 559,
+      "comment_count": 6,
+      "share_count": 0,
+      "repost_count": 0,
+      "read_count": 23117,
+      "favorite_count": 157,
+      "digg_count": 559,
+      "share_url": "https://www.lemon8-app.com/@nicolina.marie2/7218767626221355525?user_id=7262344915936658478",
+      "article_url": "https://www.lemon8-app.com/@nicolina.marie2/7218767626221355525?user_id=7262344915936658478",
+      "display_url": "https://www.lemon8-app.com/@nicolina.marie2/7218767626221355525?user_id=7262344915936658478",
+      "article_class": "Video",
+      "search_item_type": "article",
+      "language": "en",
+      "author": {
+       "name": "Nicolina Marie",
+       "author_id": "7445007481832637486",
+       "user_unique_name": "nicolina.marie2"
+      }
+     }
+    ]
+   },
+   "code": 0,
+   "result_status": 5
+  },
+  0
+ ]
+}

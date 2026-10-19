@@ -1,0 +1,73 @@
+{
+ "code": 200,
+ "data": {
+  "data": [
+   {
+    "type": "search_result",
+    "object": {
+     "id": "2094519486510585204",
+     "type": "article",
+     "title": "2026年深圳<em>视频</em>拍摄<em>制作</em>怎么选？优质机构看这几点",
+     "url": "https://api.zhihu.com/articles/2094519486510585204",
+     "excerpt": "跨境电商进入“视觉决胜”的深水区。当你的竞品还在用静态图硬撑时，头部大卖的主图视频早已迭代到了第三版。在深圳，每天有上千家工厂转型出海，但真正能靠视觉内容把客单价拉高30%的卖家，往往都卡在了“找对制作方”这一步。 20…",
+     "content": "<p data-pid=\"LvxMYW9l\">2026年，跨境电商进入“视觉决胜”的深水区。当你的竞品还在用静态图硬撑时，头部大卖的主图视频早已迭代到了第三版。在深圳，每天有上千家…",
+     "voteup_count": 1,
+     "comment_count": 0,
+     "created_time": 1792152399,
+     "updated_time": 1792152399,
+     "author": {
+      "name": "A 风轻扬",
+      "url_token": "a-feng-qing-yang"
+     }
+    },
+    "highlight": {
+     "title": "2026年深圳<em>视频</em>拍摄<em>制作</em>怎么选？优质机构看这几点"
+    }
+   },
+   {
+    "type": "search_result",
+    "object": {
+     "id": "2094474142263386484",
+     "type": "question",
+     "title": "AIGC <em>视频制作</em>在成都、浙江好找工作吗？",
+     "url": "https://api.zhihu.com/questions/2094474142263386484",
+     "comment_count": 0,
+     "updated_time": 1792141548,
+     "excerpt": "",
+     "content": "",
+     "author": {}
+    },
+    "highlight": {
+     "title": "AIGC <em>视频制作</em>在成都、浙江好找工作吗？"
+    }
+   },
+   {
+    "type": "search_result",
+    "object": {
+     "id": "2094424668933460734",
+     "type": "answer",
+     "title": "微信视频投票该如何制作？",
+     "url": "https://api.zhihu.com/answers/2094424668933460734",
+     "excerpt": "微信原生投票只支持简单图片，无法直接上传<em>视频</em>。想要做同时展示图片 + 短视频的投票评选，推荐用第三方工具搭建。下面以互动酷平台为例，完整讲清楚图片<em>视频</em>投票活动从搭建、设置到发布全流程，…",
+     "content": "<p data-pid=\"XK95j5G8\"><b>先说结论：</b></p><p data-pid=\"F6Zve8GE\">微信原生投票只支持简单图片，无法直接上传视频。</p><…",
+     "voteup_count": 0,
+     "comment_count": 0,
+     "created_time": 1792129753,
+     "updated_time": 1792129753,
+     "author": {
+      "name": "互动酷",
+      "url_token": "hu-dong-ku-77"
+     },
+     "question": {
+      "id": "2060289401763239462",
+      "name": "微信<em>视频</em>投票该如何<em>制作</em>？",
+      "type": "question"
+     }
+    },
+    "highlight": {
+     "title": "微信<em>视频</em>投票该如何<em>制作</em>？"
+    }
+   }
+  ]
+ }
+}

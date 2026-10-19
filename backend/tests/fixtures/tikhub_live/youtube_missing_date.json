@@ -1,0 +1,33 @@
+{
+ "code": 200,
+ "data": {
+  "keyword": "video editing",
+  "videos": [
+   {
+    "video_id": "unknown-date-fixture",
+    "title": "Best Video Editing Software in 2026 (I Tested Them All)",
+    "duration": "18:02",
+    "view_count": "3,803 views",
+    "author": "Think Media",
+    "channel_id": "UCGxjDWAN1KwrkXYVi8CXtjQ",
+    "thumbnails": [
+     {
+      "url": "https://i.ytimg.com/vi/lkz8huDV-iU/hq720_custom_2.jpg?sqp=CJS3ydYG-oaymwEjCOgCEMoBSFryq4qpAxUIARUAAAAAGAElAADIQj0AgKJDeAE=&rs=AOn4CLApDxgqjqH9Dwv5zHgjle7elbf3mg",
+      "width": 360,
+      "height": 202
+     },
+     {
+      "url": "https://i.ytimg.com/vi/lkz8huDV-iU/hq720_custom_2.jpg?sqp=CJS3ydYG-oaymwEXCNAFEJQDSFryq4qpAwkIARUAAIhCGAE=&rs=AOn4CLCwFJEoD-GsMKlmcA46j6aaji-wsA",
+      "width": 720,
+      "height": 404
+     }
+    ],
+    "description_snippet": "Trying to figure out which video editing software is the best for you? Check out this breakdown! ⭐️ Our free YouTube growth ...",
+    "url": "https://www.youtube.com/watch?v=lkz8huDV-iU"
+   }
+  ],
+  "shorts": [],
+  "channels": [],
+  "playlists": []
+ }
+}

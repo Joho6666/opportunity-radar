@@ -1,8 +1,9 @@
 """Domestic platforms through TikHub's paid API: 小红书, 微博, 知乎, 抖音.
 
 Each search_page performs at most one billed request; continuation requires an explicit
-cursor. These shapes are fixture contracts and have not been verified against a live paid endpoint. Parsers are pure functions over TikHub's JSON so they can be tested on saved
-responses without network or cost.
+cursor where the provider supports it. Parsers are pure functions over TikHub's JSON so
+they can be tested on saved responses without network or cost. Field mappings were
+verified against real paid responses on 2026-10-16 (see tikhub-live-verification.json).
 """
 from __future__ import annotations
 
@@ -154,33 +155,44 @@ def parse_zhihu(payload: dict, query: str) -> list[RawItem]:
     return items
 
 
+def _beijing_time(value) -> datetime | None:
+    """Douyin v3 createTime is a Beijing-time string; epoch cross-checked on a real item."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CHINA)
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC)
+
+
 def parse_douyin(payload: dict, query: str) -> list[RawItem]:
+    """抖音 v3 搜索：data.data[] 为扁平视频条目（itemId/title/url/likes/createTime）。
+
+    v3 单次返回的是筛选条件下的整批结果（实测可达 1000 条），应用只取平台排序的
+    首屏 50 条（与其它来源的首屏语义一致），其余交给本地时间/业务词过滤。
+    """
+    rows = _rows(payload, "data", "data")
+    total = len(rows)
     items = []
-    for card in _rows(payload,"data","data"):
-        aweme = card.get("aweme_info") or {}
-        aweme_id = str(aweme.get("aweme_id") or "")
-        desc = clean_text(aweme.get("desc"))
-        if not aweme_id or not desc:
+    for item in rows[:50]:
+        item_id = str(item.get("itemId") or item.get("item_id") or "")
+        title = clean_text(item.get("title"))
+        if not item_id or not title:
             continue
-        stats = aweme.get("statistics") or {}
-        author = aweme.get("author") or {}
-        comments = [clean_text(c.get("text")) for c in card.get("comment_list") or [] if c.get("text")]
+        link = str(item.get("url") or "")
+        url = link if link.startswith("https://") else f"https://www.douyin.com/video/{item_id}"
         items.append(RawItem(
-            external_id=aweme_id, title=desc[:160], content=desc, url=f"https://www.douyin.com/video/{aweme_id}",
-            author=author.get("nickname"), source="douyin", platform="douyin",
-            published_at=_epoch(aweme.get("create_time")),
-            engagement={"likes": _count(stats.get("digg_count")), "comments": _count(stats.get("comment_count")), "shares": _count(stats.get("share_count")), "plays": _count(stats.get("play_count"))},
-            metadata={"content_kind":"video","query": query, "acquisition_tool": "tikhub", "original_platform": "douyin", "top_comments": " | ".join(comments[:3])[:500]},
+            external_id=item_id, title=title[:160], content=title, url=url,
+            author=clean_text(item.get("nickname")) or None, source="douyin", platform="douyin",
+            published_at=_beijing_time(item.get("createTime")),
+            engagement={"likes": _count(item.get("likes")), "fans": _count(item.get("fans"))},
+            metadata={"content_kind":"video","query": query, "acquisition_tool": "tikhub", "original_platform": "douyin",
+                      "provider_total_items": total,
+                      "date_status": "provider_string_asia_shanghai" if item.get("createTime") else "unknown",
+                      "validation_status": "live_verified"},
         ))
-        for comment in card.get("comment_list") or []:
-            cid = comment.get("cid") or comment.get("comment_id") or comment.get("id")
-            text = clean_text(comment.get("text"))
-            if not cid or len(text) < 10:
-                continue
-            items.append(RawItem(external_id=f"{aweme_id}:comment:{cid}",title=text[:160],content=text,
-                url=f"https://www.douyin.com/video/{aweme_id}#comment-{cid}",author=(comment.get("user") or {}).get("nickname"),
-                source="douyin",platform="douyin",published_at=_epoch(comment.get("create_time")),
-                metadata={"query":query,"acquisition_tool":"tikhub","original_platform":"douyin","content_kind":"comment","parent_video_id":aweme_id,"comment_id":str(cid)}))
     return items
 
 
@@ -189,7 +201,7 @@ class _TikHubCnCollector(SourceAdapter):
     method = "GET"
 
     def capabilities(self) -> CollectorCapabilities:
-        return CollectorCapabilities(search=True, detail=True)
+        return CollectorCapabilities(search=True, detail=False)
 
     def request_args(self, query: str) -> dict:
         raise NotImplementedError
@@ -201,17 +213,36 @@ class _TikHubCnCollector(SourceAdapter):
         items, _ = await self.search_page(query)
         return items
 
-    async def search_page(self, query: str, cursor: str | None = None) -> tuple[list[RawItem], str | None]:
+    async def search_configured(self, query: str, source_config: dict[str, str]) -> list[RawItem]:
+        items, _ = await self.search_page(query, source_config=source_config)
+        return items
+
+    async def search_page(self, query: str, cursor: str | None = None, *, source_config: dict[str, str] | None = None) -> tuple[list[RawItem], str | None]:
         settings = get_settings()
         query = query.strip()
         if not query:
             raise RuntimeError("TIKHUB_QUERY_REQUIRED")
         if not settings.tikhub_api_key:
-            raise RuntimeError("TIKHUB_API_KEY is not configured")
+            from ..core.errors import AppError
+            raise AppError("TIKHUB_NOT_CONFIGURED", "TikHub 未配置；不会发送请求。", 409)
         url = settings.tikhub_base_url.rstrip("/") + self.path
         headers = {"Authorization": f"Bearer {settings.tikhub_api_key}", "Accept": "application/json"}
         args = self.request_args(query)
-        if cursor is not None:
+        hours = int((source_config or {}).get("freshness_hours", "168"))
+        if self.slug == "xiaohongshu":
+            args["time_filter"] = "一天内" if hours <= 24 else "一周内" if hours <= 168 else "半年内"
+        elif self.slug == "douyin":
+            # v3 native publish-time tiers: 0=any, 3=last 3 days, 7=last 7 days, 30=last month.
+            args["date_type"] = "3" if hours <= 72 else "7" if hours <= 168 else "30" if hours <= 720 else "0"
+        elif self.slug == "zhihu":
+            args["time_interval"] = "a_day" if hours <= 24 else "a_week" if hours <= 168 else "a_month" if hours <= 720 else "three_months" if hours <= 2160 else "all"
+        # TikHub has no native 30-day option for some platforms: fetch a wider first page,
+        # then apply the exact published-at cutoff in collection_filter.
+        if self.slug == "douyin":
+            if cursor is not None:
+                # v3 returns one bounded batch; a guessed continuation could repeat the first page and bill again.
+                raise ValueError("抖音 v3 搜索不支持翻页")
+        elif cursor is not None:
             state = json.loads(cursor) if cursor.startswith("{") else {}
             position = int(state.get("position", cursor) if state else cursor)
             if not 0 <= position <= 10000:
@@ -240,7 +271,7 @@ class _TikHubCnCollector(SourceAdapter):
         if self.slug == "zhihu" and isinstance(data.get("paging"), dict) and not data["paging"].get("is_end", True):
             from urllib.parse import urlparse, parse_qs
             next_cursor = parse_qs(urlparse(data["paging"].get("next", "")).query).get("offset", [None])[0]
-        if next_cursor is not None and self.slug in {"xiaohongshu", "douyin"}:
+        if next_cursor is not None and self.slug in {"xiaohongshu"}:
             state = {"position": int(next_cursor)}
             for key in ("search_id", "search_session_id", "backtrace"):
                 if data.get(key) is not None:
@@ -259,7 +290,7 @@ class XiaohongshuCollector(_TikHubCnCollector):
     path = "/api/v1/xiaohongshu/app_v2/search_notes"
 
     def request_args(self, query: str) -> dict:
-        return {"keyword": query, "page": 1, "sort_type": "time_descending", "time_filter": "一周内", "ai_mode": 0}
+        return {"keyword": query, "page": 1, "sort_type": "time_descending", "time_filter": "一周内", "note_type": "不限", "search_id": "", "search_session_id": "", "source": "explore_feed", "ai_mode": 0}
 
     def parse(self, payload: dict, query: str) -> list[RawItem]:
         return parse_xiaohongshu(payload, query)
@@ -289,12 +320,12 @@ class ZhihuCollector(_TikHubCnCollector):
 
 class DouyinCollector(_TikHubCnCollector):
     slug = "douyin"
-    path = "/api/v1/douyin/search/fetch_general_search_v1"
+    # v1 返回 400（历史探测）；v3 已实测可用并带原生发布时间档。
+    path = "/api/v1/douyin/search/fetch_video_search_v3"
     method = "POST"
 
     def request_args(self, query: str) -> dict:
-        # publish_time "7": last week only; older posts are rarely still open requests.
-        return {"keyword": query, "cursor": 0, "sort_type": "2", "publish_time": "7", "search_id": "", "backtrace": ""}
+        return {"query": query, "date_type": "7", "label_type": 0, "duration_type": 0}
 
     def parse(self, payload: dict, query: str) -> list[RawItem]:
         return parse_douyin(payload, query)

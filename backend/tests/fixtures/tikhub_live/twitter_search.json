@@ -1,0 +1,72 @@
+{
+ "code": 200,
+ "data": {
+  "status": "ok",
+  "next_cursor": "DAACCgACHUxKlXCAJxAKAAMdTEqVcH…",
+  "timeline": [
+   {
+    "type": "tweet",
+    "tweet_id": "2109763754971857009",
+    "screen_name": "HurricaneCrypt0",
+    "created_at": "Mon Oct 12 21:50:51 +0000 2026",
+    "text": "THIS IS F**KING GOLD\n\nTHIS GUY STOPPED EDITING YOUTUBE VIDEOS AND BUILT A CLAUDE SYSTEM THAT NOW MAKES $30K/MONTH.\n\nInstead of spe…",
+    "lang": "en",
+    "favorites": 120,
+    "retweets": 26,
+    "replies": 8,
+    "quotes": 2,
+    "views": "6399",
+    "bookmarks": 125,
+    "sensitive": false,
+    "user_info": {
+     "name": "Hurricane",
+     "screen_name": "HurricaneCrypt0",
+     "rest_id": "1899339211322630145",
+     "verified": true
+    }
+   },
+   {
+    "type": "tweet",
+    "tweet_id": "2098000582443430019",
+    "screen_name": "EHuanglu",
+    "created_at": "Thu Sep 10 10:48:12 +0000 2026",
+    "text": "never thought AI could do video editing\n\nnow i think my 14 yrs editing experience is done\n\nGPT-6 Astra watched 84 clips, edit, tri…",
+    "lang": "en",
+    "favorites": 2303,
+    "retweets": 232,
+    "replies": 148,
+    "quotes": 34,
+    "views": "251390",
+    "bookmarks": 2054,
+    "sensitive": false,
+    "user_info": {
+     "name": "el.cine",
+     "screen_name": "EHuanglu",
+     "rest_id": "1130161200191303681",
+     "verified": true
+    }
+   },
+   {
+    "type": "tweet",
+    "tweet_id": "2108562012493975645",
+    "screen_name": "He1s_Sammy",
+    "created_at": "Fri Oct 09 14:15:33 +0000 2026",
+    "text": "This is EXTREMELY dangerous.\n\nAN 18 YEAR OLD CLAIMS HE MAKES $10,000/MONTH USING AI WHILE HE SLEEPS.\n\nAnd most people still don’t …",
+    "lang": "en",
+    "favorites": 119,
+    "retweets": 16,
+    "replies": 9,
+    "quotes": 0,
+    "views": "14238",
+    "bookmarks": 118,
+    "sensitive": false,
+    "user_info": {
+     "name": "S 🫧",
+     "screen_name": "He1s_Sammy",
+     "rest_id": "1818918150504603648",
+     "verified": true
+    }
+   }
+  ]
+ }
+}

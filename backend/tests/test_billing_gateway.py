@@ -258,6 +258,40 @@ def test_paid_response_archived_before_schema_failure(billing, monkeypatch):
     assert row.payload["data"] == "schema drift" and "SECRET" not in str(row.payload)
 
 
+def test_archive_strips_nul_and_non_finite_values_for_jsonb():
+    """Real providers return NUL bytes and NaN; jsonb rejects both after billing."""
+    import httpx
+    import json as json_module
+    from app.services.billing_gateway import archive_response
+    captured = {}
+
+    class FakeConn:
+        def execute(self, statement, params):
+            captured.update(params)
+
+    class FakeTx:
+        def __enter__(self):
+            return FakeConn()
+
+        def __exit__(self, *args):
+            return False
+
+    class FakeRepo:
+        class engine:
+            @staticmethod
+            def begin():
+                return FakeTx()
+
+    request = httpx.Request("GET", "https://api.tikhub.io/api/v1/kuaishou/app/search_video_v2")
+    # httpx refuses NaN in json=; real providers emit it, so build the body manually.
+    body = json_module.dumps({"data": {"note": "bad\x00value", "ratio": float("nan")}}).encode()
+    response = httpx.Response(200, content=body, headers={"content-type": "application/json"}, request=request)
+    archive_response((FakeRepo(), "00000000-0000-0000-0000-000000000001"), response, "q")
+    payload = json_module.loads(captured["payload"])
+    assert payload["data"]["note"] == "badvalue"
+    assert payload["data"]["ratio"] is None
+
+
 def test_all_paid_adapters_block_without_network(monkeypatch):
     from app.collectors.tikhub import TikHubCollector
     from app.collectors.tikhub_cn import DOMESTIC_COLLECTORS

@@ -1,0 +1,70 @@
+{
+ "code": 200,
+ "data": {
+  "data": [
+   {
+    "type": 1,
+    "item": {
+     "id": "7657590655010508054",
+     "desc": "5 uses of keyframe  #videoediting #capcutseries #foryoupagе #fyp #foryou ",
+     "createTime": 1782921769,
+     "author": {
+      "uniqueId": "hoor_edits9",
+      "nickname": "Hoor 🌸 | content creator",
+      "id": "7608447696910943254"
+     },
+     "stats": {
+      "diggCount": 365000,
+      "commentCount": 4139,
+      "shareCount": 26500,
+      "playCount": 5600000,
+      "collectCount": 190500
+     }
+    }
+   },
+   {
+    "type": 1,
+    "item": {
+     "id": "7635521642168438030",
+     "desc": "Good editing isnt just cutting on beat. Today Im breaking down what I cut to, to make my edits invisible. ALSO…",
+     "createTime": 1777822200,
+     "author": {
+      "uniqueId": "omgadrian",
+      "nickname": "Adrian Per",
+      "id": "6773913272451974150"
+     },
+     "stats": {
+      "diggCount": 169600,
+      "commentCount": 3058,
+      "shareCount": 11200,
+      "playCount": 1300000,
+      "collectCount": 69600
+     }
+    }
+   },
+   {
+    "type": 1,
+    "item": {
+     "id": "7666699897382522126",
+     "desc": "lets build your editing style, shall we? 🤭🫶 lmk if i missed anything/things youre still curious about 🙂‍↕️ #ed…",
+     "createTime": 1785042704,
+     "author": {
+      "uniqueId": "ingoodgracess",
+      "nickname": "grace ⭐️",
+      "id": "7444193142534685742"
+     },
+     "stats": {
+      "diggCount": 205600,
+      "commentCount": 2872,
+      "shareCount": 11600,
+      "playCount": 1500000,
+      "collectCount": 136800
+     }
+    }
+   }
+  ],
+  "cursor": 12,
+  "has_more": 1,
+  "status_code": 0
+ }
+}

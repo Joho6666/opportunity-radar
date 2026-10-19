@@ -32,6 +32,11 @@ def reserve(provider: str, source: str, estimated_tokens: int = 0, *, endpoint: 
     if not settings.paid_api_enabled:
         raise AppError("PAID_API_DISABLED", "真实付费调用默认关闭，请先由服务端管理员启用。", 403)
     context = _context.get()
+    if settings.app_env.lower() == "local":
+        if not settings.local_manual_tikhub_enabled or provider != "tikhub":
+            raise AppError("LOCAL_PROVIDER_DISABLED", "本机仅显式开放 TikHub 手动采集。", 403)
+        if context and context["scheduled"]:
+            raise AppError("LOCAL_SCHEDULED_PAID_DISABLED", "本机仅开放手动付费采集，不允许自动调度。", 403)
     if not context or not hasattr(context["repository"], "engine"):
         raise AppError("BILLING_CONTEXT_REQUIRED", "付费调用需要持久化授权上下文。", 403)
     prices = {"tikhub": settings.tikhub_price_per_request, "firecrawl": settings.firecrawl_price_per_request,
@@ -52,6 +57,8 @@ def reserve(provider: str, source: str, estimated_tokens: int = 0, *, endpoint: 
         estimated_tokens += 256
         price = max(price, settings.llm_price_output_per_mtok if provider == "llm" else price) * estimated_tokens / 1_000_000
     cost = max(1, _micros(price))
+    if settings.app_env.lower() == "local" and cost > 100_000:
+        raise AppError("LOCAL_REQUEST_COST_LIMIT", "单次请求价格超过 USD 0.10 上限。", 403)
     repo = context["repository"]
     from ..repositories.postgres import as_uuid
     uid = as_uuid(context["user_id"])
@@ -86,7 +93,12 @@ def reserve(provider: str, source: str, estimated_tokens: int = 0, *, endpoint: 
 
 
 def archive_response(reservation, response, query: str | None = None) -> None:
-    """Capture before parsing, without credentials, headers or provider cache capabilities."""
+    """Capture before parsing, without credentials, headers or provider cache capabilities.
+
+    PostgreSQL jsonb cannot store NUL characters or non-finite floats, and real
+    providers (e.g. Kuaishou) do return them: strip/drop those values or the
+    archive insert fails after the paid call already happened.
+    """
     repo, call_id = reservation
     settings = get_settings()
     try:
@@ -103,11 +115,15 @@ def archive_response(reservation, response, query: str | None = None) -> None:
             for secret in (settings.tikhub_api_key, settings.firecrawl_api_key, settings.llm_api_key):
                 if secret:
                     value = value.replace(secret, "[REDACTED]")
+            if "\x00" in value:
+                value = value.replace("\x00", "")
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
         return value
     payload = sanitize(payload)
     with repo.engine.begin() as conn:
         conn.execute(text("INSERT INTO provider_responses(call_id,user_id,endpoint,query,status_code,request_id,payload) SELECT id,user_id,:endpoint,:query,:status,:request,CAST(:payload AS jsonb) FROM billing_calls WHERE id=CAST(:id AS uuid) ON CONFLICT(call_id) DO NOTHING"),
-                     {"id": call_id, "endpoint": response.request.url.path, "query": query, "status": response.status_code, "request": payload.get("request_id") if isinstance(payload, dict) else None, "payload": json.dumps(payload, ensure_ascii=False)})
+                     {"id": call_id, "endpoint": response.request.url.path, "query": query, "status": response.status_code, "request": payload.get("request_id") if isinstance(payload, dict) else None, "payload": json.dumps(payload, ensure_ascii=False, allow_nan=False)})
 
 
 def finish(reservation, payload: dict | None = None, *, ok: bool = True) -> None:

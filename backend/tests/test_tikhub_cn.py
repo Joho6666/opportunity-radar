@@ -8,6 +8,7 @@ from app.collectors import tikhub_cn
 from app.collectors.text import clean_text
 from app.collectors.tikhub_cn import DouyinCollector, parse_douyin, parse_weibo, parse_weibo_time, parse_xiaohongshu, parse_zhihu
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.services.evidence_classifier import classify_tiktok
 
 NOW = datetime(2026, 10, 13, 4, 0, tzinfo=UTC)  # 12:00 Beijing time
@@ -62,15 +63,20 @@ def test_zhihu_keeps_articles_and_answers_and_skips_other_cards():
     assert answer.url == "https://www.zhihu.com/question/q9/answer/ans1" and answer.title == "去哪找外包？"
 
 
-def test_douyin_card_keeps_top_comments():
-    payload = {"data": {"data": [{"aweme_info": {
-        "aweme_id": "7695912449523101107", "desc": "想找个能帮我剪辑的老师，有人吗？", "create_time": 1791520454,
-        "author": {"nickname": "某人"}, "statistics": {"digg_count": 25, "comment_count": 195, "share_count": 0, "play_count": 0},
-    }, "comment_list": [{"text": "我可以"}, {"text": "私信你了"}]}, {"aweme_info": {"aweme_id": "x"}}]}}
+def test_douyin_v3_flat_items_and_no_comment_fabrication():
+    payload = {"data": {"data": [
+        {"itemId": "7695912449523101107", "title": "想找个能帮我剪辑的老师，有人吗？", "createTime": "2026-10-08 21:54:14",
+         "likes": "25", "nickname": "某人", "fans": "10", "url": "https://www.douyin.com/video/7695912449523101107",
+         "comment_list": [{"text": "我可以"}, {"text": "私信你了"}]},
+        {"title": "缺少 itemId 的条目应被跳过", "createTime": "2026-10-08 21:54:14"},
+    ]}}
     [item] = parse_douyin(payload, "剪辑")
     assert item.url == "https://www.douyin.com/video/7695912449523101107"
-    assert item.metadata["top_comments"] == "我可以 | 私信你了"
-    assert item.engagement["comments"] == 195
+    assert item.published_at == datetime(2026, 10, 8, 13, 54, 14, tzinfo=UTC)  # createTime 是北京时间
+    assert item.metadata["date_status"] == "provider_string_asia_shanghai"
+    # v3 不返回评论数据：不把 legacy comment_list 捏造成独立证据
+    assert "top_comments" not in item.metadata and "comment" not in item.metadata.get("content_kind", "")
+    assert item.engagement == {"likes": 25, "fans": 10}
 
 
 def test_douyin_collector_posts_to_configured_base_url(monkeypatch):
@@ -83,12 +89,12 @@ def test_douyin_collector_posts_to_configured_base_url(monkeypatch):
     monkeypatch.setattr(tikhub_cn, "get_settings", lambda: Settings(tikhub_api_key="k", tikhub_base_url="https://api.tikhub.dev/"))
     monkeypatch.setattr(tikhub_cn.fetcher, "post_json", fake_post_json)
     assert asyncio.run(DouyinCollector().search(" 剪辑 ")) == []
-    assert calls == [("https://api.tikhub.dev/api/v1/douyin/search/fetch_general_search_v1", {"keyword": "剪辑", "cursor": 0, "sort_type": "2", "publish_time": "7", "search_id": "", "backtrace": ""}, "Bearer k")]
+    assert calls == [("https://api.tikhub.dev/api/v1/douyin/search/fetch_video_search_v3", {"query": "剪辑", "date_type": "7", "label_type": 0, "duration_type": 0}, "Bearer k")]
 
 
 def test_collector_refuses_without_key(monkeypatch):
     monkeypatch.setattr(tikhub_cn, "get_settings", lambda: Settings(tikhub_api_key=""))
-    with pytest.raises(RuntimeError, match="TIKHUB_API_KEY"):
+    with pytest.raises(AppError, match="TikHub 未配置"):
         asyncio.run(DouyinCollector().search("剪辑"))
 
 
@@ -142,19 +148,28 @@ def test_empty_domestic_success_is_distinct_from_schema_failure(parser,payload):
     assert parser(payload,"需求") == []
 
 
-def test_comment_author_and_evidence_identity_stay_separate():
-    payload={"data":{"data":[{"aweme_info":{"aweme_id":"v1","desc":"我们专业团队提供剪辑服务","author":{"nickname":"服务商"}},"comment_list":[{"cid":"c1","text":"需要制作商品视频，请问报价多少","user":{"nickname":"买方"}},{"text":"没有ID的评论不能当作独立证据"}]}]}}
-    video,comment=parse_douyin(payload,"视频")
-    assert video.author == "服务商" and comment.author == "买方"
-    assert video.external_id != comment.external_id
-    assert comment.metadata["parent_video_id"] == "v1"
-    assert classify_tiktok(comment.content).category == "buyer"
+def test_douyin_v3_legacy_comment_cards_are_not_turned_into_evidence():
+    # 仅当响应是 v3 扁平结构时才产出条目；legacy 评论卡片不产生伪造证据。
+    payload = {"data": {"data": [{"aweme_info": {"aweme_id": "v1", "desc": "我们专业团队提供剪辑服务", "author": {"nickname": "服务商"}},
+                                  "comment_list": [{"cid": "c1", "text": "需要制作商品视频，请问报价多少", "user": {"nickname": "买方"}}]}]}}
+    assert parse_douyin(payload, "视频") == []
+    assert classify_tiktok("需要制作商品视频，请问报价多少").category == "buyer"  # 分类器本身仍能把买方文本判为 buyer
+
+
+def test_douyin_v3_rejects_pagination_cursor_before_transport(monkeypatch):
+    monkeypatch.setattr(tikhub_cn, "get_settings", lambda: Settings(tikhub_api_key="offline-only"))
+
+    async def post(url, args, **kwargs):
+        raise AssertionError("cursor 必须在任何付费请求之前被拒绝")
+
+    monkeypatch.setattr(tikhub_cn.fetcher, "post_json", post)
+    with pytest.raises(ValueError):
+        asyncio.run(DouyinCollector().search_page("需求", "20"))
 
 @pytest.mark.parametrize("cls,key,cursor",[
     (tikhub_cn.XiaohongshuCollector,"page",2),
     (tikhub_cn.WeiboCollector,"page",2),
     (tikhub_cn.ZhihuCollector,"offset","20"),
-    (tikhub_cn.DouyinCollector,"cursor",20),
 ])
 def test_domestic_cursor_is_explicit_and_bounded(monkeypatch,cls,key,cursor):
     from urllib.parse import urlparse,parse_qs
@@ -177,7 +192,6 @@ def test_invalid_weibo_dates_are_unknown(raw):
 
 @pytest.mark.parametrize("cls,first,expected", [
     (tikhub_cn.XiaohongshuCollector, {"data": {"items": [], "has_more": True, "search_id": "s1", "search_session_id": "session1"}}, {"page": "2", "search_id": "s1", "search_session_id": "session1"}),
-    (tikhub_cn.DouyinCollector, {"data": [], "has_more": True, "cursor": 20, "search_id": "s2", "backtrace": "b2"}, {"cursor": 20, "search_id": "s2", "backtrace": "b2"}),
 ])
 def test_empty_page_keeps_provider_sessions(cls, first, expected, monkeypatch):
     from urllib.parse import urlparse, parse_qs

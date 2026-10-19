@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl, model_validator
 OpportunityType = Literal["job", "client", "project", "business", "github"]
 OpportunityStatus = Literal["new", "pending_verification", "verified", "ready_to_contact", "contacted", "replied", "quoted", "negotiating", "won", "lost", "saved", "ignored"]
 RadarStatus = Literal["active", "paused", "running", "error"]
-SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search", "tikhub", "xiaohongshu", "weibo", "zhihu", "douyin"]
+SourceSlug = Literal["mock", "public_web", "github", "hackernews", "rss", "web_search", "tikhub", "xiaohongshu", "weibo", "zhihu", "douyin", "reddit", "bilibili", "kuaishou", "lemon8", "pipixia", "threads", "twitter", "youtube", "wechat_search", "telegram", "linkedin", "toutiao"]
 
 
 class SkillInput(BaseModel):
@@ -74,6 +74,16 @@ class RadarCreate(BaseModel):
             raise ValueError("General monitoring does not use a minimum budget")
         if any(len(key) > 80 or len(value) > 2048 for key, value in self.source_config.items()):
             raise ValueError("Source configuration is too large")
+        if self.source_config.get("lead_hunt") == "true":
+            if self.keywords and (len(self.keywords)>3 or len(self.keywords)*len(self.sources)>6 or any(not k.strip() or len(k)>100 for k in self.keywords)):
+                raise ValueError("抓单最多3关键词、6次首屏请求，每词1–100字")
+            if "hunt_conditions" in self.source_config:
+                from .hunt import HuntConditions
+                HuntConditions.model_validate_json(self.source_config["hunt_conditions"])
+                if self.mode != "general" or not self.keywords or not self.sources or len(set(self.sources)) != len(self.sources):
+                    raise ValueError("条件抓单须为通用模式，至少1个平台和关键词，平台不可重复")
+                if self.collection_policy.time_basis != "published" or self.collection_policy.include_unknown_dates:
+                    raise ValueError("条件抓单必须按原帖发布时间过滤，未知时间不得当新需求")
         return self
 
 
@@ -101,7 +111,7 @@ class RadarRead(RadarCreate):
 class RadarRunRead(BaseModel):
     id: str
     radar_id: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: Literal["queued", "running", "completed", "partial", "failed"]
     stats: RadarRunStats
     error_message: str | None = None
     error_code: str | None = None

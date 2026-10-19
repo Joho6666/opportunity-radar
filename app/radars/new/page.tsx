@@ -47,7 +47,7 @@ function CloudNewRadar() {
         <label className="text-sm"><span className="mb-1 block text-muted">最低预算（元）</span><input type="number" min="0" value={budget} onChange={(e) => setBudget(e.target.value)} className="w-full rounded border border-line bg-ink px-3 py-2" /></label>
       </div>
       <CollectionControls policy={policy} onChange={setPolicy} hours={freshness} onHours={setFreshness} disabled={loading}/>
-      <p className="mt-3 text-xs leading-5 text-muted">每个关键词单独查询。RSS可填写完整订阅地址，再用包含词筛选原文。国内来源仍待实采验证；小红书、抖音上游目前固定近一周，知乎近一月，本地时间设置只能进一步缩小结果范围。</p>
+      <p className="mt-3 text-xs leading-5 text-muted">每个关键词单独查询。RSS可填写完整订阅地址，再用包含词筛选原文。国内来源已完成真实搜索验证：小红书时间档一天/一周/半年，抖音 v3 近3天/近7天/近一月，知乎一天/一周/一月；本地时间设置只会进一步缩小结果范围，未知发布时间剔除。</p>
       <div className="mt-5 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-900">TikHub（含国内平台）和 Web Search 可能产生费用。付费默认禁用；手动与定时运行均需要服务端授权和额度。</div>
       {error && <p className="mt-4 rounded border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-700">{error}</p>}
       <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => router.back()}>取消</Button><Button onClick={() => void submit()} disabled={loading || !validPolicy(policy) || !Number.isInteger(freshness) || freshness < 1 || freshness > 720 || name.trim().length < 1 || goal.trim().length < 10}>{loading ? "保存中…" : "保存雷达"}</Button></div>

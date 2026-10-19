@@ -1,0 +1,83 @@
+{
+ "code": 200,
+ "data": {
+  "children": [
+   {
+    "post": {
+     "id": "t3_1x7m2ee",
+     "postTitle": "I Tried Beating Zero Company Without Using Cover",
+     "createdAt": "2026-10-16T17:14:28.093000+0000",
+     "url": "https://i.redd.it/ekvl3cyw3vvh1.jpeg",
+     "domain": "i.redd.it",
+     "permalink": "/r/ZeroCompany/comments/1x7m2ee/i_tried_beating_zero_company_without_using_cover/",
+     "score": 2,
+     "commentCount": 0,
+     "isSelfPost": false,
+     "languageCode": "en",
+     "content": {
+      "markdown": "Saw the astromech-only challenge posted here recently, and he inspired me to take a page out of his book and s…"
+     },
+     "authorInfo": {
+      "id": "t2_218ek8gx",
+      "name": "Numbuh_17"
+     },
+     "subreddit": {
+      "name": "ZeroCompany",
+      "prefixedName": "r/ZeroCompany"
+     }
+    }
+   },
+   {
+    "post": {
+     "id": "t3_1x7m21t",
+     "postTitle": "Release Preview Build 26200.9807/26300.9807 - Windows Insider Program",
+     "createdAt": "2026-10-16T17:14:05.874000+0000",
+     "url": "https://learn.microsoft.com/en-us/windows-insider/release-notes/release-preview-24h2-25h2/build-26200-9807-26300-9807",
+     "domain": "learn.microsoft.com",
+     "permalink": "/r/windowsinsiders/comments/1x7m21t/release_preview_build_262009807263009807_windows/",
+     "score": 1,
+     "commentCount": 0,
+     "isSelfPost": false,
+     "languageCode": "en",
+     "content": {
+      "markdown": "Release date: 16 October 2026\n\nThese release notes are for Windows 11 Builds 26200.9807 and 26300.9807 (KB5127…"
+     },
+     "authorInfo": {
+      "id": "t2_7rvel",
+      "name": "Froggypwns"
+     },
+     "subreddit": {
+      "name": "windowsinsiders",
+      "prefixedName": "r/windowsinsiders"
+     }
+    }
+   },
+   {
+    "post": {
+     "id": "t3_1x7m1e8",
+     "postTitle": "Title: Seeking a Dedicated YouTube Partner & Co-Creator for a High-Potential New Channel (…",
+     "createdAt": "2026-10-16T17:13:19.921000+0000",
+     "url": "https://www.reddit.com/r/cofounderhunt/comments/1x7m1e8/title_seeking_a_dedicated_youtube_partner/",
+     "domain": "self.cofounderhunt",
+     "permalink": "/r/cofounderhunt/comments/1x7m1e8/title_seeking_a_dedicated_youtube_partner/",
+     "score": 1,
+     "commentCount": 0,
+     "isSelfPost": true,
+     "languageCode": "en",
+     "content": {
+      "markdown": "Hello everyone. I am looking to build a serious, long-term partnership with a highly dedicated creator. Before…"
+     },
+     "authorInfo": {
+      "id": "t2_1oabui6n4u",
+      "name": "Maximum-Hospital9463"
+     },
+     "subreddit": {
+      "name": "cofounderhunt",
+      "prefixedName": "r/cofounderhunt"
+     }
+    }
+   }
+  ],
+  "pageInfo": true
+ }
+}

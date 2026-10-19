@@ -1,0 +1,33 @@
+{
+ "code": 200,
+ "data": {
+  "business_type": "article",
+  "total": 1,
+  "no_more": "",
+  "results": {
+   "data": [
+    {
+     "type": 2,
+     "count": 1,
+     "totalCount": 1,
+     "items": [
+      {
+       "desc": "【场景二：长<em class=\"highlight\">视频剪辑</em>】 对于需要剪辑的长视频，呆头鹅免费软件同样适用。视频分割：将长视频分割成多个片段。选择性剪辑：选择你认为重要的片段进行剪辑。",
+       "docID": "unknown-date-fixture",
+       "docType": 0,
+       "doc_url": "http://mp.weixin.qq.com/s?__biz=Mzk5MDg1NjI1Ng==&mid=2247490955&idx=1&sn=0f18237d31e97f13c3dab188907eab58&chksm=c4b543154bc6a678a81c25dfe1c474f119695882e2894aa0fc185ce6630d1e71f0e3873d79e8#rd",
+       "itemShowType": 0,
+       "mpScene": 7,
+       "src_type": 49,
+       "thumbUrl": "https://mmbiz.qpic.cn/mmbiz_jpg/xTCKgtRr2NibFrBjib3WPabaRvOUibuea40hCbmNU7JES0dLXbCyj9QSWgaWHZ93291zZicXmCdFjCTwEQQjprQFJvLnX7MK21knaH2aawVOwro/0?wx_fmt=jpeg",
+       "title": "2026年，呆头鹅<em class=\"highlight\">视频剪辑</em>免费软件，6分钟如何剪辑1小时视频"
+      }
+     ]
+    }
+   ],
+   "offset": 1,
+   "pageNumber": 1,
+   "query": "视频制作"
+  }
+ }
+}

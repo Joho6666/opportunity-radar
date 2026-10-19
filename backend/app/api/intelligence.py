@@ -21,8 +21,8 @@ from ..schemas.collection import CollectionPolicy
 
 router = APIRouter(prefix="/api/intelligence", tags=["Intelligence"])
 
-EvidenceSource = Literal["github", "hackernews", "rss", "tikhub", "xiaohongshu", "weibo", "zhihu", "douyin", "web_search"]
-TIKHUB_SOURCES = {"tikhub", "xiaohongshu", "weibo", "zhihu", "douyin"}
+EvidenceSource = Literal["github", "hackernews", "rss", "tikhub", "xiaohongshu", "weibo", "zhihu", "douyin", "reddit", "web_search", "bilibili", "kuaishou", "lemon8", "pipixia", "threads", "twitter", "youtube", "wechat_search", "telegram", "linkedin", "toutiao"]
+from ..collectors.tikhub_catalog import TIKHUB_SOURCES
 BILLABLE_SOURCES = TIKHUB_SOURCES | {"web_search"}
 
 
@@ -49,10 +49,14 @@ def _source_status() -> dict:
     costs = {}
     def positive_price(price):
         return price if isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0 else None
+    from ..services.price_evidence import verified_tikhub_price
     for cls in (*DOMESTIC_COLLECTORS, TikHubCollector):
-        from ..services.price_evidence import verified_tikhub_price
         verified = verified_tikhub_price(cls.path)
         costs[cls.slug] = verified[0] if verified else None
+    from ..collectors.tikhub_catalog_adapter import CONTRACTS
+    for slug, contract in CONTRACTS.items():
+        verified = verified_tikhub_price(contract.path)
+        costs[slug] = verified[0] if verified else None
     return {
         "github": {"configured": True},
         "hackernews": {"configured": True},
@@ -82,20 +86,29 @@ def _runtime_sources(repo, user_id):
     """Live status reflects this tenant's archived response compatibility only."""
     sources = _source_status()
     from ..collectors.tikhub_cn import DOMESTIC_COLLECTORS
+    from ..collectors.tikhub import TikHubCollector
+    from ..collectors.tikhub_catalog_adapter import CatalogCollector, CONTRACTS
     from ..services.price_evidence import verified_tikhub_price
-    for cls in DOMESTIC_COLLECTORS:
-        entry=sources[cls.slug]
-        verified=verified_tikhub_price(cls.path)
-        entry["pricing_evidence"]=verified[1] if verified else None
-        if not hasattr(repo,"engine"):
+    domestic = {cls.slug: cls for cls in DOMESTIC_COLLECTORS}
+    catalog = {slug: CatalogCollector(slug) for slug in CONTRACTS}
+    for slug, adapter in [*domestic.items(), ('tikhub', TikHubCollector()), *catalog.items()]:
+        entry = sources[slug]
+        verified = verified_tikhub_price(adapter.path)
+        entry['pricing_evidence'] = verified[1] if verified else None
+        if not hasattr(repo, "engine"):
             continue
         from sqlalchemy import text
         from ..repositories.postgres import as_uuid
         with repo.engine.connect() as conn:
-            row=conn.execute(text("SELECT r.payload,r.query,r.captured_at FROM provider_responses r JOIN billing_calls c ON c.id=r.call_id WHERE r.user_id=CAST(:uid AS uuid) AND r.endpoint=:path AND r.status_code=200 AND c.status='succeeded' ORDER BY r.captured_at DESC LIMIT 1"),{"uid":as_uuid(user_id),"path":cls.path}).mappings().first()
+            row = conn.execute(text("SELECT r.payload,r.query,r.captured_at FROM provider_responses r JOIN billing_calls c ON c.id=r.call_id WHERE r.user_id=CAST(:uid AS uuid) AND r.endpoint=:path AND r.status_code=200 AND c.status='succeeded' ORDER BY r.captured_at DESC LIMIT 1"), {"uid": as_uuid(user_id), "path": adapter.path}).mappings().first()
         if row:
             try:
-                cls().parse(row["payload"],row["query"] or "")
+                from ..collectors.tikhub_catalog_adapter import PARSERS
+                from ..collectors.tikhub import parse_tiktok_search
+                parser = getattr(adapter, "parse", None)
+                if parser is None:
+                    parser = ((lambda payload, query: parse_tiktok_search(payload, query)) if slug == 'tikhub' else PARSERS[slug])
+                parser(row["payload"], row["query"] or "")
                 entry.update(validation_status="response_compatible",live_verified=True,live_checked_at=row["captured_at"].isoformat())
             except Exception:
                 entry.update(validation_status="response_incompatible",live_verified=False)
@@ -128,6 +141,13 @@ async def collect_evidence(
     except AppError as exc:
         if payload.request_id:
             finish_request(repo, user.id, payload.request_id, {"code": exc.code, "message": exc.message, "status_code": exc.status_code}, failed=True)
+        raise
+    except Exception as exc:
+        # A post-billing processing failure must not leave the request id stuck in
+        # "running": record it as failed so the retry path is explicit (a retry
+        # with a new id bills again; the same id can no longer double-charge).
+        if payload.request_id:
+            finish_request(repo, user.id, payload.request_id, {"code": "COLLECTION_PROCESSING_FAILED", "message": f"{type(exc).__name__}: 已采集响应但处理失败，未保存证据。", "status_code": 500}, failed=True)
         raise
 
 
@@ -193,7 +213,8 @@ async def _collect_once(payload, source, query, max_age_days, user, repo):
     batch = raw_items_to_evidence_batch(
         source="tiktok" if source == "tikhub" else source,
         query=query,
-        items=accepted,
+        # EvidenceBatch caps at 500 items; larger pages are truncated at this boundary.
+        items=accepted[:500],
         batch_id=collection_id,
     )
     from ..services.semantic_classifier import enrich_batch

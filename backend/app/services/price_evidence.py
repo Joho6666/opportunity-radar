@@ -13,7 +13,11 @@ from ..core.config import get_settings
 def tikhub_endpoint(source):
     from ..collectors.tikhub_cn import DOMESTIC_COLLECTORS
     from ..collectors.tikhub import TikHubCollector
-    return next((cls.path for cls in (*DOMESTIC_COLLECTORS, TikHubCollector) if cls.slug == source), None)
+    from ..collectors.tikhub_catalog_adapter import CONTRACTS
+    from ..collectors.tikhub_modes import MODE_COLLECTORS
+    if source in CONTRACTS:
+        return CONTRACTS[source].path
+    return next((cls.path for cls in (*DOMESTIC_COLLECTORS, TikHubCollector, *MODE_COLLECTORS) if cls.slug == source), None)
 
 
 def verified_tikhub_price(endpoint):
@@ -28,7 +32,7 @@ def verified_tikhub_price(endpoint):
         if receipt.get("price_usd") != price or receipt.get("unit") != "USD/request" or not receipt.get("verified_by"):
             return None
         url=urlsplit(receipt.get("source_url", ""))
-        if url.scheme != "https" or url.hostname not in {"tikhub.io","user.tikhub.io","docs.tikhub.io"} or url.username or url.password:
+        if url.scheme != "https" or url.hostname not in {"tikhub.io","user.tikhub.io","docs.tikhub.io","api.tikhub.io","api.tikhub.dev"} or url.username or url.password:
             return None
         verified=datetime.fromisoformat(receipt.get("verified_at", "").replace("Z","+00:00"))
         if verified.tzinfo is None or verified > datetime.now(UTC):

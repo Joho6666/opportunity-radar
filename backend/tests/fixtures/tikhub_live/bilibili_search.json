@@ -1,0 +1,82 @@
+{
+ "code": 200,
+ "data": {
+  "code": 0,
+  "data": {
+   "seid": "2897809785930478395",
+   "page": 1,
+   "pagesize": 20,
+   "numResults": 1000,
+   "numPages": 50,
+   "rqt_type": "search",
+   "result": [
+    {
+     "type": "video",
+     "id": 117451668848937,
+     "author": "积木comfyui",
+     "mid": 2008798642,
+     "typename": "设计·创意",
+     "arcurl": "http://www.bilibili.com/video/av117451668848937",
+     "aid": 117451668848937,
+     "bvid": "BV1PLJ86VERM",
+     "title": "flux3 klein “边界框”-新的局部编辑方式，简单又准确",
+     "description": "工作流：https://pan.quark.cn/s/70f8cd9dba72\n模型：https://pan.quark.cn/s/f3a7845fd714 \n----------------------------------------…",
+     "pic": "//i2.hdslb.com/bfs/archive/e400d477ae1c82fd388a13b61669b6e62642fb4f.jpg",
+     "play": 13,
+     "video_review": 0,
+     "favorites": 1,
+     "tag": "qwenimage 2.1,comfyui插件,视频制作",
+     "review": 0,
+     "pubdate": 1792170329,
+     "senddate": 1792170970,
+     "duration": "4:21",
+     "like": 0
+    },
+    {
+     "type": "video",
+     "id": 117451585029321,
+     "author": "死神和他的树",
+     "mid": 1823846636,
+     "typename": "动画综合",
+     "arcurl": "http://www.bilibili.com/video/av117451585029321",
+     "aid": 117451585029321,
+     "bvid": "BV1aZJb6REDn",
+     "title": "我制作的mj视频(5)",
+     "description": "-",
+     "pic": "//i2.hdslb.com/bfs/archive/7d2ffd32db41a1748610c48ef7a03dce367d592d.jpg",
+     "play": 6,
+     "video_review": 0,
+     "favorites": 0,
+     "tag": "Michael Jackson,娱乐,鬼畜",
+     "review": 0,
+     "pubdate": 1792169176,
+     "senddate": 1792169192,
+     "duration": "0:40",
+     "like": 0
+    },
+    {
+     "type": "video",
+     "id": 117451584968196,
+     "author": "小鹿女品质情报站",
+     "mid": 3546974705944984,
+     "typename": "数码",
+     "arcurl": "http://www.bilibili.com/video/av117451584968196",
+     "aid": 117451584968196,
+     "bvid": "BV1VZJb6REmW",
+     "title": "还不清楚制冰机怎么正确使用，看视频秒懂~#制冰机#惠康制冰机#家用制冰机-7135354475757325605",
+     "description": "",
+     "pic": "//i1.hdslb.com/bfs/archive/d2e7cb6d1a3c93fa034fc43b6bad8755f87232e9.jpg",
+     "play": 0,
+     "video_review": 0,
+     "favorites": 0,
+     "tag": "制作,原创,记录",
+     "review": 1,
+     "pubdate": 1792168978,
+     "senddate": 1792168982,
+     "duration": "0:42",
+     "like": 0
+    }
+   ]
+  }
+ }
+}
