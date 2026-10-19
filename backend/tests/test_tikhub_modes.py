@@ -265,6 +265,34 @@ def test_hiring_signal_survives_buyer_business_terms_but_excluded_terms_still_ap
     assert kept == [] and counts["terms"] == 1
 
 
+def test_distinct_linkedin_jobs_are_not_collapsed_by_shared_signal_text():
+    from app.collectors.tikhub_modes import parse_linkedin_jobs
+    from app.services.dedup_service import deduplicate
+
+    items = parse_linkedin_jobs(load("linkedin_search_jobs.json"), "video editor")
+    assert len(items) >= 2
+    assert len({item.url for item in items}) == len(items)
+    unique, removed = deduplicate(items)
+    assert removed == 0 and len(unique) == len(items)
+
+
+def test_hiring_signal_exclude_word_ignores_classification_boilerplate():
+    """身份排除词「招聘」不应命中我们追加的分类说明，否则 LinkedIn 会整页被丢掉。"""
+    from datetime import timedelta
+    from app.collectors.tikhub_modes import parse_linkedin_jobs
+    from app.schemas.collection import CollectionPolicy
+    from app.services.collection_filter import filter_page
+
+    item = parse_linkedin_jobs(load("linkedin_search_jobs.json"), "video editor")[0]
+    assert "招聘" in item.content
+    assert "招聘" not in f"{item.title}\n{item.metadata.get('job_title')}\n{item.metadata.get('company')}"
+    policy = CollectionPolicy(required_terms=["电商"], excluded_terms=["招聘"], match_mode="all",
+                              time_basis="published", include_unknown_dates=False, sort="latest",
+                              activity_filter="any", min_interactions=0)
+    kept, counts = filter_page([item], policy, freshness_hours=168, now=item.published_at + timedelta(hours=1))
+    assert kept == [item] and counts["terms"] == 0
+
+
 def test_new_sources_are_accepted_by_radar_schema_and_price_path():
     from app.services.price_evidence import tikhub_endpoint
 

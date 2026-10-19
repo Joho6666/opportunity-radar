@@ -1,4 +1,5 @@
 import { DEFAULT_COLLECTION_POLICY, splitTerms } from "./collection-policy";
+import { allRegionNames, regionLabel } from "./region-tree";
 
 export const BUSINESS_PRESETS = [
   {
@@ -116,12 +117,13 @@ const DOUYIN_CITY_NAMES = new Set(["北京", "上海", "广州", "深圳", "杭�
   "石家庄", "太原", "南昌", "贵阳", "南宁", "海口", "兰州", "西宁", "银川", "乌鲁木齐", "呼和浩特", "拉萨", "桂林", "柳州",
   "珠海", "中山", "惠州", "汕头", "温州", "嘉兴", "绍兴", "台州", "金华", "泉州", "烟台", "潍坊", "徐州", "常州", "南通",
   "扬州", "洛阳"]);
+const REGION_QUERY_SKIP = new Set([...DOUYIN_CITY_NAMES, ...allRegionNames()]);
 const DOUYIN_LEADING = ["找人", "求推荐", "求", "需要", "想找", "帮我", "有没有", "哪里", "怎么", "做一个", "做"];
 const DOUYIN_TRAILING = ["制作", "拍摄", "剪辑", "外包", "需求", "推荐", "开发", "设计", "服务", "团队", "公司"];
 
 export function shortenDouyinKeyword(value: string): string {
   const tokens = (value || "").split(/[\s，,、/|]+/).filter(Boolean);
-  const kept = tokens.filter(token => !DOUYIN_CITY_NAMES.has(token) && !/^.{2,4}[市省区县]$/.test(token));
+  const kept = tokens.filter(token => !REGION_QUERY_SKIP.has(token) && !/^.{2,4}[市省区县]$/.test(token));
   for (const token of (kept.length ? kept : tokens)) {
     let core = token.replace(/^[，,。.！!？?、/|:：;；()（）[\]【】"'“”]+|[，,。.！!？?、/|:：;；()（）[\]【】"'“”]+$/g, "");
     let changed = true;
@@ -253,8 +255,18 @@ export function estimateHunt({ catalog, sources, keywords, remainingRequests, re
     overBudget, overDailyRequests, overDailyCost, truncatedKeywords, note: notes.join(" ") };
 }
 
-export const HUNT_ROLES = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室"];
-export const HUNT_INTENTS = ["找人制作", "咨询方案", "长期合作"];
+export const HUNT_ROLE_GROUPS = [
+  { label: "商家", roles: ["电商商家", "品牌方", "实体店"] },
+  { label: "团队", roles: ["创业者", "代运营工作室", "市场团队", "培训机构"] },
+  { label: "个人", roles: ["学生", "自由职业", "自媒体"] },
+];
+export const HUNT_ROLES = HUNT_ROLE_GROUPS.flatMap(group => group.roles);
+export const HUNT_INTENT_GROUPS = [
+  { label: "正在采购", intents: ["找人制作", "询价报价"] },
+  { label: "还在了解", intents: ["咨询方案"] },
+  { label: "希望持续", intents: ["长期合作"] },
+];
+export const HUNT_INTENTS = HUNT_INTENT_GROUPS.flatMap(group => group.intents);
 export type HuntConditions = { regions: string[]; roles: string[]; intents: string[]; match_mode: "local" | "remote" | "keep_unknown"; start_at?: string; end_at?: string };
 export const DEFAULT_HUNT_CONDITIONS: HuntConditions = { regions: [], roles: [], intents: [], match_mode: "remote" };
 export function shanghaiToUtc(value: string) { return new Date(`${value}:00+08:00`).toISOString(); }
@@ -264,7 +276,7 @@ export function describeHuntConditions(config: Record<string,string>) {
   if (!config.hunt_conditions) return "旧版配置，尚未启用条件匹配";
   const c=readHuntConditions(config);
   const time=c.start_at ? `${utcToShanghaiInput(c.start_at).replace("T"," ")} 至 ${utcToShanghaiInput(c.end_at).replace("T"," ")}（上海时间）` : `${config.freshness_hours || "168"}小时内`;
-  return `${time} · ${c.regions.join(" / ") || "全国"} · ${c.roles.join(" / ") || "角色不限"} · ${c.intents.join(" / ") || "意图不限"} · ${{local:"严格本地",remote:"远程优先",keep_unknown:"保留未知"}[c.match_mode]}`;
+  return `${time} · ${c.regions.map(regionLabel).join("；") || "全国"} · ${c.roles.join(" / ") || "角色不限"} · ${c.intents.join(" / ") || "意图不限"} · ${{local:"严格本地",remote:"远程优先",keep_unknown:"保留未知"}[c.match_mode]}`;
 }
 export function previewHuntQueries(keywords: string[], sources: string[], conditions: HuntConditions) {
   const limit = Math.min(3, Math.floor(6 / Math.max(1,sources.length)));
@@ -289,7 +301,7 @@ export function buildLeadRadar(preset: BusinessPreset, sources: string[], value:
   if (baseSlots + extraCalls > MAX_RUN_REQUESTS) throw new Error(`本次需要 ${baseSlots + extraCalls} 次调用，超过每轮 ${MAX_RUN_REQUESTS} 次硬上限。`);
   if (![24, 72, 168, 720].includes(hours)) throw new Error("请选择有效的发布时间窗口。");
   if (conditions) {
-    if (conditions.regions.length > 10 || conditions.regions.some(r => !r.trim() || r.length>20) || conditions.roles.some(r => !HUNT_ROLES.includes(r)) || conditions.intents.some(i => !HUNT_INTENTS.includes(i))) throw new Error("请检查地区和角色、意图选项。");
+    if (conditions.regions.length > 10 || conditions.regions.some(r => !r.trim() || r.length>20) || conditions.roles.length > 12 || conditions.roles.some(r => r.trim().length < 2 || r.trim().length > 20) || conditions.intents.some(i => !HUNT_INTENTS.includes(i))) throw new Error("请检查地区和角色、意图选项。");
     if (conditions.start_at || conditions.end_at) { const start=Date.parse(conditions.start_at ?? ""), end=Date.parse(conditions.end_at ?? ""); if (!Number.isFinite(start) || !Number.isFinite(end) || start>=end || end-start>30*24*3600000) throw new Error("自定义时间须填写有效起止时间，跨度最多30天。"); }
   }
   if (!businessTerms.length || businessTerms.length > 20 || businessTerms.some(term => term.length > 100)) throw new Error("请保留至少一个业务匹配词（最多20个）。");

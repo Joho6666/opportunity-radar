@@ -23,7 +23,7 @@ export const IDENTITY_BUSINESS_PRESETS: { id: string; name: string; remote_deliv
   { id: "office", name: "PPT / Word / Excel", remote_deliverable: true, match_words: ["PPT", "Word", "Excel", "演示文稿", "表格", "文档"] },
   { id: "workflow", name: "Skill / 工作流自动化", remote_deliverable: true, match_words: ["自动化", "工作流", "Skill", "Agent", "n8n"] },
 ];
-export const IDENTITY_ROLE_PRESETS = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室"];
+export const IDENTITY_ROLE_PRESETS = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室", "市场团队", "培训机构", "学生", "自由职业", "自媒体"];
 export const IDENTITY_SOURCE_CHOICES: { id: string; name: string }[] = [
   { id: "xiaohongshu", name: "小红书" }, { id: "douyin", name: "抖音" }, { id: "weibo", name: "微博" },
   { id: "zhihu", name: "知乎" }, { id: "bilibili", name: "B站" }, { id: "kuaishou", name: "快手" },
@@ -47,7 +47,7 @@ export function validateIdentity(identity: LocalIdentity): string | null {
   if (identity.businesses.length > 10) return "业务能力最多 10 项。";
   if (identity.businesses.some(item => !item.name.trim() || item.name.length > 40 || !item.id.trim() || item.id.length > 40)) return "业务名称需为 1–40 字。";
   if (identity.target_roles.length > 10 || identity.target_roles.some(role => !role.trim() || role.length > 20)) return "目标客户角色需为 1–20 字，最多 10 个。";
-  if (identity.service_mode === "regions" && identity.regions.length === 0) return "指定省市交付时至少填写一个地区。";
+  if (identity.service_mode === "regions" && identity.regions.length === 0) return "指定地区交付时至少填写一个地区。";
   if (identity.regions.length > 10 || identity.regions.some(region => !region.trim() || region.length > 20)) return "服务地区需为 1–20 字，最多 10 个。";
   if (identity.preferred_sources.length > 10 || identity.preferred_sources.some(source => !SOURCE_IDS.has(source))) return "默认平台偏好只能选择当前集成的平台。";
   if (identity.buyer_keywords.length > 10 || identity.buyer_keywords.some(term => !term.trim() || term.length > 100)) return "买方关键词需为 1–100 字，最多 10 个。";

@@ -13,7 +13,7 @@ it("自定义时间和角色地区可从保存JSON恢复为上海时间编辑值
  const saved=JSON.parse(JSON.stringify(r));
  expect(readHuntConditions(saved.source_config)).toEqual(c);
  expect(utcToShanghaiInput(readHuntConditions(saved.source_config).start_at)).toBe("2026-10-10T08:00");
- expect(describeHuntConditions(saved.source_config)).toContain("深圳 / 佛山 · 品牌方 · 咨询方案 · 严格本地");
+ expect(describeHuntConditions(saved.source_config)).toContain("中国 / 广东 / 深圳；中国 / 广东 / 佛山 · 品牌方 · 咨询方案 · 严格本地");
  expect(describeHuntConditions({})).toContain("旧版配置");
 });
 it("条件不突破关键词请求上限，自定义反向区间拒绝保存", () => {

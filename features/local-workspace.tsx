@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { runManualRadar } from "@/lib/manual-radar";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowRight, CircleAlert, CircleCheck, Loader2, Plus, RefreshCw, Settings2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
@@ -13,7 +13,9 @@ import { LocalProviderSection } from "@/features/local-provider-settings";
 import { splitTerms } from "@/lib/collection-policy";
 import { identityToRadarPrefill, type LocalIdentity } from "@/lib/identity";
 import { approveRun, fetchBudgets } from "@/lib/local-providers";
-import { BUSINESS_PRESETS, buildLeadRadar, isHuntSourceSelectable, HUNT_ROLES, HUNT_INTENTS, DEFAULT_HUNT_CONDITIONS, describeHuntConditions, readHuntConditions, shanghaiToUtc, utcToShanghaiInput, groupHuntSources, selectAllAvailable, estimateHunt, platformQueries, shortenDouyinKeyword, WECHAT_SCOPES, wechatScopeMeta, DEFAULT_WECHAT_SCOPE, parseTelegramChannels, parseToutiaoLinks, telegramChannelError, toutiaoLinkError, MAX_RUN_REQUESTS, type HuntConditions, type HuntSource, type WechatScope } from "@/lib/lead-hunt";
+import { RegionPicker } from "@/features/region-picker";
+import { regionLabel } from "@/lib/region-tree";
+import { BUSINESS_PRESETS, buildLeadRadar, isHuntSourceSelectable, HUNT_ROLE_GROUPS, HUNT_ROLES, HUNT_INTENT_GROUPS, DEFAULT_HUNT_CONDITIONS, describeHuntConditions, readHuntConditions, shanghaiToUtc, utcToShanghaiInput, groupHuntSources, selectAllAvailable, estimateHunt, platformQueries, shortenDouyinKeyword, WECHAT_SCOPES, wechatScopeMeta, DEFAULT_WECHAT_SCOPE, parseTelegramChannels, parseToutiaoLinks, telegramChannelError, toutiaoLinkError, MAX_RUN_REQUESTS, type HuntConditions, type HuntSource, type WechatScope } from "@/lib/lead-hunt";
 import { formatLocalDate, localRequest } from "@/lib/local-edition";
 
 type Radar = { collection_policy?: { required_terms?: string[]; excluded_terms?: string[] }; id: string; name: string; goal: string; mode: "general" | "acquisition"; status: string; sources: string[]; source_config: Record<string, string>; keywords: string[]; frequency: string; freshness_hours: number; local_schedule_enabled: boolean; last_run_at: string | null; next_run_at: string | null; stats: { items_found: number; analyzed: number; duplicates_removed: number } };
@@ -131,6 +133,19 @@ export function LocalRadarDetail() {
   </AppShell>;
 }
 
+function FormSection({ step, title, hint, children }: { step: string; title: string; hint?: string; children: ReactNode }) {
+  return <section id={`hunt-step-${step}`} className="scroll-mt-24 rounded-xl border border-line bg-white p-4 sm:p-5">
+    <div className="mb-4 flex items-start gap-3">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-indigo-50 text-xs font-semibold text-ai">{step}</span>
+      <div className="min-w-0"><h2 className="text-base font-semibold text-mist">{title}</h2>{hint && <p className="mt-1 text-sm leading-6 text-muted">{hint}</p>}</div>
+    </div>
+    {children}
+  </section>;
+}
+
+const huntField = "h-11 w-full rounded-md border border-line bg-white px-3 text-sm text-mist transition-colors";
+const huntLabel = "block text-sm font-medium text-mist";
+
 export function LocalNewRadar() {
   const router = useRouter();
   const [presetId, setPresetId] = useState(BUSINESS_PRESETS[0].id);
@@ -158,6 +173,8 @@ export function LocalNewRadar() {
   const [wechatShareCount, setWechatShareCount] = useState(1);
   const [telegramChannels, setTelegramChannels] = useState("");
   const [toutiaoLinks, setToutiaoLinks] = useState("");
+  const [customRole, setCustomRole] = useState("");
+  const [roleError, setRoleError] = useState("");
   useEffect(() => {
     const editId = new URLSearchParams(window.location.search).get("edit");
     if (!editId) return;
@@ -276,9 +293,9 @@ export function LocalNewRadar() {
     const needsLinks = item.id === "toutiao" && !toutiaoParsed.length;
     const selected = sources.includes(item.id);
     const selectable = isHuntSourceSelectable(item) && (selected || !(needsChannels || needsLinks));
-    return <div key={item.id} data-source-card={item.id} className={`rounded-md border p-3 ${!isHuntSourceSelectable(item) ? "bg-slate-50" : ""} ${selected ? "border-indigo-300 bg-indigo-50/50" : "border-line"}`}>
+    return <div key={item.id} data-source-card={item.id} className={`rounded-lg border p-3 transition-colors ${!isHuntSourceSelectable(item) ? "bg-slate-50" : "bg-white"} ${selected ? "border-ai bg-indigo-50/70" : "border-line"}`}>
       <label className={`flex items-start gap-3 ${selectable ? "cursor-pointer" : "cursor-not-allowed"}`}>
-        <input type="checkbox" aria-label={`选择 ${item.name}`} disabled={!selectable} checked={selected} onChange={() => toggleSource(item.id)} className="mt-1"/>
+        <input type="checkbox" aria-label={`选择 ${item.name}`} disabled={!selectable} checked={selected} onChange={() => toggleSource(item.id)} className="mt-1 size-4 accent-indigo-600"/>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium">{item.name} <span className={`text-xs ${statusTone(item)}`}>{item.status}</span></span>
           <span className="mt-1 block text-xs text-muted">
@@ -292,7 +309,7 @@ export function LocalNewRadar() {
       </label>
       {item.id === "wechat_search" && <div className="mt-2 pl-7">
         <label className="block text-xs text-muted">搜索范围
-          <select aria-label="微信搜一搜搜索范围" value={wechatScope} onChange={event => pickWechatScope(event.target.value as WechatScope)} className="mt-1 h-9 w-full rounded border border-line bg-white px-2 text-sm">
+          <select aria-label="微信搜一搜搜索范围" value={wechatScope} onChange={event => pickWechatScope(event.target.value as WechatScope)} className="mt-1 h-11 w-full rounded border border-line bg-white px-2 text-sm">
             {WECHAT_SCOPES.map(scope => <option key={scope.id} value={scope.id} disabled={scope.state === "unavailable"}>
               {scope.label}{scope.state === "verified" ? "（已实测）" : scope.state === "unavailable" ? "（不可用：无原文链接）" : "（未单独实测）"}
             </option>)}
@@ -300,7 +317,7 @@ export function LocalNewRadar() {
         </label>
         <p className="mt-1 text-xs leading-5 text-muted">{wechatScopeMeta(wechatScope).hint}</p>
         {wechatScope === "video" && <label className="mt-2 block text-xs text-muted">生成分享链条数（默认 1，最多 3）
-          <select aria-label="视频号分享链条数" value={wechatShareCount} onChange={event => setWechatShareCount(Number(event.target.value))} className="mt-1 h-9 w-full rounded border border-line bg-white px-2 text-sm">
+          <select aria-label="视频号分享链条数" value={wechatShareCount} onChange={event => setWechatShareCount(Number(event.target.value))} className="mt-1 h-11 w-full rounded border border-line bg-white px-2 text-sm">
             {[1, 2, 3].map(count => <option key={count} value={count}>{count} 条 · 约 +USD {(0.02 * count).toFixed(2)} · 约 {30 * count} 秒</option>)}
           </select>
         </label>}
@@ -308,7 +325,7 @@ export function LocalNewRadar() {
       </div>}
       {item.id === "telegram" && <div className="mt-2 pl-7">
         <label className="block text-xs text-muted">指定频道用户名（1–3 个，逗号分隔）
-          <input aria-label="Telegram 频道用户名" value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="@channel1, @channel2" className="mt-1 h-9 w-full rounded border border-line px-2 text-sm"/>
+          <input aria-label="Telegram 频道用户名" value={telegramChannels} onChange={event => setTelegramChannels(event.target.value)} placeholder="@channel1, @channel2" className="mt-1 h-11 w-full rounded border border-line px-2 text-sm"/>
         </label>
         <p className={`mt-1 text-xs leading-5 ${telegramError ? "text-amber-900" : "text-muted"}`}>{telegramError || `将搜 ${telegramParsed.length} 个频道，每个 1 次请求（USD 0.001/频道）；这是频道内搜索，不是全站搜索。`}</p>
       </div>}
@@ -336,46 +353,81 @@ export function LocalNewRadar() {
     {!publicFree.length && <p className="mt-2 text-sm text-muted">公开来源状态读取中…</p>}
     <div className="mt-2 grid gap-2 sm:grid-cols-2">{publicFree.map(sourceCard)}{groups.web.map(sourceCard)}</div>
   </div>;
-  return <AppShell><PageHeader title={editing ? "编辑抓单条件" : "新建抓单"} description="业务 → 平台 → 关键词 → 条件 → 手动抓取 → 结果。只查首屏，不自动翻页。"/>
-    <Panel className="max-w-3xl space-y-6 p-5"><label className="block text-sm"><span className="mb-2 block font-medium">雷达名称（可选）</span><input aria-label="雷达名称" value={radarName} onChange={e => setRadarName(e.target.value)} placeholder="例如：产品视频需求·手动验证" className="h-11 w-full rounded border border-line px-3"/></label>
-      <label className="block text-sm"><span className="mb-2 block font-medium">1. 我的业务</span><select value={presetId} onChange={event => choosePreset(event.target.value)} className="h-11 w-full rounded-md border border-line bg-white px-3">{BUSINESS_PRESETS.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <fieldset><legend className="text-sm font-medium">2. 抓单平台</legend><p className="mt-2 text-xs leading-5 text-muted">已核对 TikHub 官方 OpenAPI：21 个平台/微信独立产品入口。可勾选不代表已授权；「不可用」默认折叠并写明真实原因。官方接口能力与本应用实际接入分开标明。</p>{!catalog.length && !sourceError && <p className="mt-2 text-sm text-muted">正在读取真实平台配置…</p>}{sourceError && <p role="alert" className="mt-2 text-sm text-red-800">{sourceError}<button className="ml-2 underline" onClick={loadSources}>重试</button></p>}
+  const choiceOn = "cursor-pointer border-ai bg-indigo-50 font-medium text-mist transition-colors";
+  const choiceOff = "cursor-pointer border-line bg-white text-mist transition-colors hover:border-slate-300 hover:bg-slate-50";
+  const pill = "inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-sm";
+  return <AppShell><PageHeader title={editing ? "编辑抓单条件" : "新建抓单"} description="按步骤填完即可手动抓取。只查首屏，不自动翻页。"/>
+    <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+    <div className="min-w-0 space-y-4">      <FormSection step="1" title="业务" hint="先选定你要接的单。换业务会换成对应的买方关键词。">
+      <label className={huntLabel}>雷达名称（可选）<input aria-label="雷达名称" value={radarName} onChange={e => setRadarName(e.target.value)} placeholder="例如：产品视频需求·手动验证" className={`mt-1 font-normal ${huntField}`}/></label>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">{BUSINESS_PRESETS.map(item => <button type="button" key={item.id} aria-pressed={presetId === item.id} onClick={() => choosePreset(item.id)} className={`min-h-11 rounded-lg border px-3 py-3 text-left ${presetId === item.id ? choiceOn : choiceOff}`}><span className="block text-sm">{item.name}</span><span className="mt-1 block text-xs font-normal leading-5 text-muted">{item.keywords}</span></button>)}</div>
+      </FormSection>
+      <FormSection step="2" title="平台" hint="可勾选不代表已授权。不可用的平台默认收起，并写明原因。">{!catalog.length && !sourceError && <p className="mt-2 text-sm text-muted">正在读取真实平台配置…</p>}{sourceError && <p role="alert" className="mt-2 text-sm text-red-800">{sourceError}<button className="ml-2 underline" onClick={loadSources}>重试</button></p>}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">可用平台（{tikhubAvailable.length}）</h3><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setSources(selectAllAvailable(catalog).filter(id => (id !== "telegram" || telegramParsed.length > 0) && (id !== "toutiao" || toutiaoParsed.length > 0)))}>全选可用平台</Button><Button variant="secondary" onClick={() => setSources([])}>清空</Button></div></div>
         <p className="mt-1 text-xs text-muted">全选会同时选中 GitHub / Hacker News / RSS（免费）；Telegram / 今日头条需先填频道/链接才会被全选。每轮最多 10 次调用（6 次首屏查询 + 分享链/频道/链接附加调用）。</p>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">{tikhubAvailable.map(sourceCard)}</div>
         {publicSection}
         <div className="mt-4"><h3 className="text-sm font-medium">微信垂类（{groups.covered.length}）</h3><p className="mt-1 text-xs text-muted">公众号文章 = 搜一搜 article 垂类（已实测）；视频号视频 = 搜一搜 video 垂类 + 逐条分享链（已实测：每条额外 2 次调用，单条约 30 秒）。</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{groups.covered.map(sourceCard)}</div></div>
         <div className="mt-4"><button type="button" aria-expanded={showUnavailable} onClick={() => setShowUnavailable(value => !value)} className="text-sm text-muted underline">不可用平台（{groups.unavailable.length}）{showUnavailable ? "收起" : "展开原因与能力"}</button>{showUnavailable && <div className="mt-2 grid gap-2 sm:grid-cols-2">{groups.unavailable.map(sourceCard)}</div>}</div>
-      </fieldset>
-      {sources.includes("rss") && <label className="block text-sm"><span className="mb-1 block">RSS 公网订阅地址</span><input type="url" value={feedUrl} onChange={event => setFeedUrl(event.target.value)} placeholder="https://example.com/feed.xml" className="h-11 w-full rounded-md border border-line px-3"/></label>}
-      <div className="block text-sm"><span className="mb-2 block font-medium">3. 买方搜索关键词（可改，1–3 个，逗号分隔）</span><textarea aria-label="买方搜索关键词" value={keywords} onChange={event => setKeywords(event.target.value)} rows={2} className="w-full rounded-md border border-line px-3 py-2"/><span className="mt-1 block text-xs text-muted">使用“求、找人、需要、外包需求”等买方表达；搜索命中不等于真实客户。</span>
-        <div className="mt-2 flex flex-wrap items-center gap-2"><span className="text-xs text-muted">按业务生成的模板：</span>{preset.keywordTemplates.map((template, index) => <button type="button" key={template} onClick={() => setKeywords(template)} className="rounded border border-line px-2 py-1 text-xs hover:bg-slate-50">{index + 1}. {template}</button>)}</div>
-        <p className="mt-1 text-xs leading-5 text-muted">抖音会自动截短为 2–4 字短词（父代理已实测：长短语 0 条、短词 8–1000 条），其他平台保留长短语；下方“查询预览”按平台显示实际发出的词。</p>
+      {sources.includes("rss") && <label className="mt-4 block text-sm">RSS 公网订阅地址<input type="url" value={feedUrl} onChange={event => setFeedUrl(event.target.value)} placeholder="https://example.com/feed.xml" className={`mt-1 ${huntField}`}/></label>}
+      </FormSection>
+      <FormSection step="3" title="关键词" hint="用「求、找人、需要、外包」这类买方说法。搜到不等于已经是客户。">
+      <label className={huntLabel}>买方搜索词（1–3 个，逗号分隔）<textarea aria-label="买方搜索关键词" value={keywords} onChange={event => setKeywords(event.target.value)} rows={2} className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm font-normal text-mist"/></label>
+        <div className="mt-3 flex flex-wrap gap-2">{preset.keywordTemplates.map(template => <button type="button" key={template} aria-pressed={keywords === template} onClick={() => setKeywords(template)} className={`${pill} ${keywords === template ? choiceOn : choiceOff}`}>{template}</button>)}</div>
+        <p className="mt-3 text-xs leading-5 text-muted">抖音会自动截成 2–4 字短词，其他平台保留原短语。右侧预览是实际发出的词。</p>
+      <label className={`mt-4 ${huntLabel}`}>业务匹配词（原文至少命中一个）<input aria-label="业务匹配词" value={businessTerms} onChange={event => setBusinessTerms(event.target.value)} className={`mt-1 font-normal ${huntField}`}/></label>
+      <div className="mt-4"><label className={huntLabel}>排除词（命中即过滤，默认来自身份设定）<input aria-label="排除词" value={excludeTerms} onChange={event => setExcludeTerms(event.target.value)} placeholder="例如：教程，招聘，代做，承接，招生" className={`mt-1 font-normal ${huntField}`}/></label>
+        <div className="mt-2 flex flex-wrap items-center gap-2">{splitTerms(excludeTerms).map(term => <span key={term} className="inline-flex min-h-11 items-center whitespace-nowrap rounded-full bg-slate-100 pl-3 text-sm text-mist">{term}<button type="button" aria-label={`移除排除词 ${term}`} onClick={() => setExcludeTerms(splitTerms(excludeTerms).filter(item => item !== term).join("，"))} className="inline-flex min-h-11 w-11 items-center justify-center text-muted">×</button></span>)}{!splitTerms(excludeTerms).length && <span className="text-sm text-muted">当前没有排除词</span>}<Link href="/settings" className="inline-flex min-h-11 items-center text-sm text-ai underline">去身份设定修改</Link></div>
+        <span className="mt-2 block text-xs text-muted">排除词在采集后过滤。已经保存的雷达要再次编辑才生效。</span>
       </div>
-      <label className="block text-sm"><span className="mb-1 block text-muted">业务匹配词（原文至少命中一个，可改）</span><input value={businessTerms} onChange={event => setBusinessTerms(event.target.value)} className="h-11 w-full rounded-md border border-line px-3"/></label>
-      <div className="block text-sm"><span className="mb-1 block text-muted">排除词（命中即过滤，可改；默认来自你的身份设定）</span><input aria-label="排除词" value={excludeTerms} onChange={event => setExcludeTerms(event.target.value)} placeholder="例如：教程，招聘，代做，承接，招生" className="h-11 w-full rounded-md border border-line px-3"/>
-        <div className="mt-2 flex flex-wrap items-center gap-2">{splitTerms(excludeTerms).map(term => <span key={term} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs">{term}<button type="button" aria-label={`移除排除词 ${term}`} onClick={() => setExcludeTerms(splitTerms(excludeTerms).filter(item => item !== term).join("，"))} className="text-muted">×</button></span>)}{!splitTerms(excludeTerms).length && <span className="text-xs text-muted">当前没有排除词</span>}<Link href="/settings" className="text-xs text-ai underline">去身份设定修改</Link></div>
-        <span className="mt-1 block text-xs text-muted">排除词写入采集策略，由现有采后过滤真实剔除；老雷达在你再次编辑前不受影响。</span>
-      </div>
-      <label className="block text-sm"><span className="mb-2 block font-medium">4. 原文发布时间（统一本地过滤窗口）</span><select aria-label="发布时间窗口" value={customTime ? "custom" : hours} onChange={event => { setCustomTime(event.target.value === "custom"); if (event.target.value !== "custom") setHours(Number(event.target.value)); }} className="h-11 rounded-md border border-line bg-white px-3"><option value={24}>最近 24 小时</option><option value={72}>最近 3 天</option><option value={168}>最近 7 天（默认）</option><option value={720}>最近 30 天</option><option value="custom">自定义起止时间</option></select><span className="mt-2 block text-xs leading-5 text-muted">按原始发布时间过滤，时间未知的内容不进入本次结果。这里不是所有平台都支持的原生搜索档位；只过滤取回首屏，不代表全量搜索。{catalog.filter(item => sources.includes(item.id)).map(item => `${item.name}：${item.time_policy ?? "仅本地过滤。"}`).join(" ")}</span></label>
+      </FormSection>
+      <FormSection step="4" title="时间与地区" hint="按原文发布时间过滤。时间未知的内容不会进入这次结果。">
+      <div className="flex flex-wrap gap-2" role="group" aria-label="发布时间窗口">{([[24, "24 小时"], [72, "3 天"], [168, "7 天"], [720, "30 天"]] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={!customTime && hours === value} onClick={() => { setCustomTime(false); setHours(value); }} className={`${pill} ${!customTime && hours === value ? choiceOn : choiceOff}`}>{label}</button>)}<button type="button" aria-pressed={customTime} onClick={() => setCustomTime(true)} className={`${pill} ${customTime ? choiceOn : choiceOff}`}>自定义</button></div>
+      <p className="mt-2 text-xs leading-5 text-muted">只过滤取回的首屏，不是全量搜索。{catalog.filter(item => sources.includes(item.id)).map(item => `${item.name}：${item.time_policy ?? "仅本地过滤。"}`).join(" ")}</p>
       {customTime && <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">开始时间（Asia/Shanghai）<input aria-label="开始时间" type="datetime-local" value={startInput} onChange={e => setStartInput(e.target.value)} className="mt-1 h-11 w-full rounded border border-line px-3"/></label><label className="text-sm">结束时间（Asia/Shanghai）<input aria-label="结束时间" type="datetime-local" value={endInput} onChange={e => setEndInput(e.target.value)} className="mt-1 h-11 w-full rounded border border-line px-3"/></label><p className="text-xs text-muted sm:col-span-2">跨度最多30天；保存为UTC。自定义范围不会让平台首屏自动补齐历史。</p></div>}
-      <fieldset><legend className="text-sm font-medium">5. 需求地区</legend><label className="mt-2 block text-sm">项目 / 服务所在地（不是作者 IP）<input aria-label="需求地区" value={regionInput} onChange={e => setRegionInput(e.target.value)} placeholder="全国（留空）；省市多选，逗号分隔，最多10个" className="mt-1 h-11 w-full rounded border border-line px-3"/></label><div className="mt-2 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setRegionInput("")}>全国</Button>{["广东","广州","深圳","佛山"].map(r => <Button key={r} variant="secondary" onClick={() => { const values=splitTerms(regionInput); setRegionInput((values.includes(r) ? values.filter(v => v!==r) : [...values,r]).join("，")); }}>{splitTerms(regionInput).includes(r) ? "✓ " : ""}{r}</Button>)}</div><div className="mt-2 flex flex-wrap gap-2">{splitTerms(regionInput).map(r => <span key={r} className="rounded bg-indigo-50 px-2 py-1 text-xs">{r}</span>)}</div><p className="mt-2 text-xs text-muted">所选地区为“或”；规则仅核实原文地点语境，不从昵称、IP、简介或查询词推断。省市不自动展开为全辖区。</p></fieldset>
-      <fieldset><legend className="text-sm font-medium">6. 目标人群（业务角色，可多选）</legend><div className="mt-2 flex flex-wrap gap-4">{HUNT_ROLES.map(role => <label key={role} className="text-sm"><input type="checkbox" checked={conditions.roles.includes(role)} onChange={() => setConditions(c => ({...c,roles:c.roles.includes(role) ? c.roles.filter(v => v!==role) : [...c.roles,role]}))}/> {role}</label>)}</div><p className="mt-2 text-xs text-muted">不选即不限；多选命中任一即可。只认正文自述职业，不推断年龄、收入；角色不明为待确认。</p></fieldset>
-      <fieldset><legend className="text-sm font-medium">7. 需求意图（可多选）</legend><div className="mt-2 flex flex-wrap gap-4">{HUNT_INTENTS.map(intent => <label key={intent} className="text-sm"><input type="checkbox" checked={conditions.intents.includes(intent)} onChange={() => setConditions(c => ({...c,intents:c.intents.includes(intent) ? c.intents.filter(v => v!==intent) : [...c.intents,intent]}))}/> {intent}</label>)}</div><p className="mt-2 text-xs text-muted">所选意图为“或”。仍需原文买方表达；卖方推广不当作采购需求，预算未知不扣为不匹配。</p></fieldset>
-      <label className="block text-sm"><span className="mb-2 block font-medium">8. 本地 / 远程匹配模式</span><select aria-label="匹配模式" value={conditions.match_mode} onChange={e => setConditions(c => ({...c,match_mode:e.target.value as HuntConditions["match_mode"]}))} className="h-11 w-full rounded border border-line bg-white px-3"><option value="remote">远程优先 · 地区未知待确认（默认）</option><option value="local">严格本地 · 有地区证据优先，未知降序待确认</option><option value="keep_unknown">保留地区未知待确认</option></select></label>
-      <div className="rounded-md border border-line bg-slate-50 p-3 text-sm leading-6"><p>本次条件：{customTime ? `${startInput || "待填"} 至 ${endInput || "待填"}（上海时间）` : `${hours}小时内`} · {regionInput || "全国"} · {conditions.roles.join(" / ") || "角色不限"} · {conditions.intents.join(" / ") || "意图不限"} · {{local:"严格本地",remote:"远程优先",keep_unknown:"保留未知"}[conditions.match_mode]}</p>
-        <div className="mt-2 rounded border border-line bg-white p-2"><p className="font-medium">查询预览（按平台实际发出）</p>{estimate.overPlatformCap ? <p className="mt-1 text-xs text-red-800">已选 {sources.length} 个平台，超过每轮 6 次首屏查询上限；受限模式按 1 个查询计。请先减少平台再看实际查询词。</p> : queryPlan.length ? <ul className="mt-1 space-y-1 text-xs">{queryPlan.map(group => <li key={group.source}><span className="font-medium">{sourceNames[group.source] ?? catalog.find(item => item.id === group.source)?.name ?? group.source}</span>：{group.queries.join("；") || "（无可用短词，需改关键词）"}</li>)}</ul> : <p className="mt-1 text-xs text-muted">先填关键词并选择平台。</p>}</div>
-        <p className="mt-2">{estimate.overPlatformCap ? <>请求估算：平台/首屏查询超限，请减少平台。</> : <>请求估算：首屏查询 <span className="font-semibold">{requests - estimate.extraRequests}</span> 次 + 附加调用 <span className="font-semibold">{estimate.extraRequests}</span> 次 = <span className="font-semibold">{requests} 次调用</span> ≈ <span className="font-semibold">USD {estimate.costUsd.toFixed(3)}</span>{estimate.extraRequests > 0 ? "（分享链/频道/链接已计入）" : ""}</>}</p>
-        <p className="text-xs">本日剩余：{remaining.requests ?? "未知"} 次请求 / USD {remaining.costUsd?.toFixed(3) ?? "未知"}（来自账本；硬上限 20 次 / USD 1）。单轮上限 USD 0.10。</p>
-        {estimate.note && <p className="text-xs text-amber-900">{estimate.note}</p>}
-        {estimate.overCallCap && <p role="alert" className="text-xs font-medium text-red-800">本轮需要 {requests} 次调用，超过每轮 {MAX_RUN_REQUESTS} 次硬上限；请减少平台或分享链条数。</p>}
-        {estimate.exceedsDaily && <p role="alert" className="text-xs font-medium text-red-800">超出可用额度：保存后无法启动，请减少平台、关键词或分享链条数。</p>}
-        <p>手动运行 · 本轮计划 {requests} 次调用（含附加）· 不翻页 · 不自动调用 AI</p>
-        <p className="text-amber-900">点击运行即授权本雷达 TikHub 手动采集：每轮最多 USD 0.10、每日最多 USD 1 / 20 请求，不授权自动调度；实际费用以平台账单为准。</p>
-        <p className="text-xs">地区、角色、意图仅为可解释规则；摘要命中仍待正文确认，不保证精准识别。时间UTC保存、Asia/Shanghai展示；评论时间不代替原帖时间。每个选中平台必须 ≥1 条入库，否则本轮标记「未达标」。</p>{blocked && <p className="text-amber-900">所选平台包含未配置或未授权来源：可以保存配置，但不能从这里启动抓取。未绕过现有付费开关、价格核验和授权。</p>}</div>
-      {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
-      <div className="flex flex-wrap justify-end gap-2"><Link href="/radars"><Button variant="secondary">返回抓单列表</Button></Link><Button variant="secondary" disabled={!canSave || busy} onClick={() => void submit(false)}>仅保存配置</Button><Button disabled={!canSave || busy || blocked} onClick={() => void submit(true)}>{busy ? "保存中…" : "保存并手动运行"}</Button></div>
-    </Panel>
+      <div className="mt-4"><RegionPicker value={splitTerms(regionInput)} onChange={regions => setRegionInput(regions.join("，"))}/></div>
+      </FormSection>
+      <FormSection step="5" title="人群与意图" hint="不选表示不限。多选命中任一即可，只认正文里的自述。">
+      <div className="space-y-3">{HUNT_ROLE_GROUPS.map(group => <div key={group.label}><p className="text-sm text-muted">{group.label}</p><div className="mt-1.5 flex flex-wrap gap-2">{group.roles.map(role => <label key={role} className={`${pill} ${conditions.roles.includes(role) ? choiceOn : choiceOff}`}><input type="checkbox" className="size-4 accent-indigo-600" checked={conditions.roles.includes(role)} onChange={() => setConditions(c => ({...c,roles:c.roles.includes(role) ? c.roles.filter(v => v!==role) : [...c.roles,role]}))}/> {role}</label>)}</div></div>)}</div><div className="mt-3 flex gap-2"><label className="min-w-0 flex-1"><span className={huntLabel}>自定义人群</span><input aria-label="自定义人群" aria-invalid={Boolean(roleError)} aria-describedby={roleError ? "custom-role-error" : undefined} value={customRole} onChange={event => setCustomRole(event.target.value)} placeholder="例如：跨境卖家" className={`mt-1 ${huntField}`}/></label><Button variant="secondary" className="mt-6" onClick={() => { const role = customRole.trim(); if (role.length < 2 || role.length > 20) { setRoleError("自定义人群需为 2–20 字"); return; } if (conditions.roles.includes(role)) { setRoleError("这个人群已经添加"); return; } if (conditions.roles.length >= 12) { setRoleError("最多 12 个人群"); return; } setConditions(c => ({...c, roles: [...c.roles, role]})); setCustomRole(""); setRoleError(""); }}>添加人群</Button></div>{roleError && <p id="custom-role-error" role="alert" className="mt-2 text-sm text-red-800">{roleError}</p>}<div className="mt-2 flex flex-wrap gap-2">{conditions.roles.filter(role => !HUNT_ROLES.includes(role)).map(role => <span key={role} className="inline-flex min-h-11 items-center whitespace-nowrap rounded-full bg-indigo-50 pl-3 text-sm text-mist">{role}<button type="button" className="inline-flex min-h-11 items-center px-3 text-red-800 underline" aria-label={`移除${role}`} onClick={() => setConditions(c => ({...c, roles: c.roles.filter(item => item !== role)}))}>移除</button></span>)}</div><p className="mt-2 text-xs text-muted">自定义人群只认「我是跨境卖家」这类自述。帖子里提到这个词，或写在昵称里，都不算。</p>
+      <div className="mt-5 space-y-3 border-t border-line pt-4">{HUNT_INTENT_GROUPS.map(group => <div key={group.label}><p className="text-sm text-muted">{group.label}</p><div className="mt-1.5 flex flex-wrap gap-2">{group.intents.map(intent => <label key={intent} className={`${pill} ${conditions.intents.includes(intent) ? choiceOn : choiceOff}`}><input type="checkbox" className="size-4 accent-indigo-600" checked={conditions.intents.includes(intent)} onChange={() => setConditions(c => ({...c,intents:c.intents.includes(intent) ? c.intents.filter(v => v!==intent) : [...c.intents,intent]}))}/> {intent}</label>)}</div></div>)}</div>
+      <p className="mt-2 text-xs text-muted">卖方的报价或推广不算买方意图。预算未知不会被记成不匹配。</p>
+      <fieldset className="mt-5 border-t border-line pt-4"><legend className="text-sm font-medium">匹配方式</legend><div className="mt-2 grid gap-2" role="radiogroup" aria-label="匹配模式">{([["remote", "远程优先", "地区未知先留下，标成待确认"], ["local", "严格本地", "有地区证据的优先"], ["keep_unknown", "保留未知", "地区对不上也不丢掉"]] as const).map(([value, title, hint]) => <label key={value} className={`flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 transition-colors ${conditions.match_mode === value ? choiceOn : choiceOff}`}><input type="radio" name="match-mode" className="mt-1 size-4 accent-indigo-600" checked={conditions.match_mode === value} onChange={() => setConditions(c => ({...c, match_mode: value}))}/><span><span className="block text-sm">{title}</span><span className="mt-0.5 block text-sm font-normal leading-5 text-muted">{hint}</span></span></label>)}</div></fieldset>
+      </FormSection>
+    </div>
+    <aside className="min-w-0 xl:sticky xl:top-20 xl:max-h-[calc(100vh-11rem)]">
+      <div className="flex max-h-[inherit] flex-col rounded-xl border border-line bg-white">
+        <div className="p-4">
+          <p className="text-sm text-muted">本轮预计</p>
+          <p className={`mt-1 text-3xl font-semibold tabular-nums ${estimate.overPlatformCap || estimate.overCallCap || estimate.exceedsDaily ? "text-red-800" : "text-mist"}`}>USD {estimate.costUsd.toFixed(3)}</p>
+          <p className="mt-1 text-sm text-muted">{estimate.overPlatformCap ? "平台或首屏查询超限" : <>首屏 {requests - estimate.extraRequests} 次 + 附加 {estimate.extraRequests} 次</>}</p>
+          <p className="mt-2 text-sm leading-6 text-muted">今日剩余 {remaining.requests ?? "未知"} 次 / USD {remaining.costUsd?.toFixed(3) ?? "未知"}。单轮上限 USD 0.10。</p>
+        </div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto border-t border-line px-4 py-3 text-sm leading-6">
+          <dl className="space-y-2">
+            <div><dt className="text-muted">时间与地区</dt><dd className="text-mist">{customTime ? `${startInput || "待填"} 至 ${endInput || "待填"}` : `${hours} 小时内`} · {splitTerms(regionInput).map(regionLabel).join("；") || "全国"}</dd></div>
+            <div><dt className="text-muted">人群与意图</dt><dd className="text-mist">{conditions.roles.join("、") || "角色不限"} · {conditions.intents.join("、") || "意图不限"}</dd></div>
+            <div><dt className="text-muted">匹配</dt><dd className="text-mist">{{local:"严格本地",remote:"远程优先",keep_unknown:"保留未知"}[conditions.match_mode]}</dd></div>
+          </dl>
+          <div className="border-t border-line pt-3">
+            <p className="font-medium text-mist">实际发出的词</p>
+            {estimate.overPlatformCap ? <p role="alert" className="mt-1 text-red-800">已选 {sources.length} 个平台，超过每轮 6 次首屏查询。请先减少平台。</p> : queryPlan.length ? <ul className="mt-2 space-y-2">{queryPlan.map(group => <li key={group.source}><span className="font-medium text-mist">{sourceNames[group.source] ?? catalog.find(item => item.id === group.source)?.name ?? group.source}</span><span className="mt-0.5 block text-muted">{group.queries.join("；") || "没有可用短词，需要改关键词"}</span></li>)}</ul> : <p className="mt-1 text-muted">先填关键词并选择平台。</p>}
+          </div>
+          {estimate.note && <p className="text-amber-900">{estimate.note}</p>}
+          {estimate.overCallCap && <p role="alert" className="font-medium text-red-800">本轮需要 {requests} 次调用，超过每轮 {MAX_RUN_REQUESTS} 次。请减少平台或分享链条数。</p>}
+          {estimate.exceedsDaily && <p role="alert" className="font-medium text-red-800">超出今日额度。保存后无法启动，请减少平台、关键词或分享链条数。</p>}
+          <p className="text-amber-900">运行即授权这次手动采集，不授权自动调度。实际费用以平台账单为准。</p>
+          <p className="text-muted">摘要命中仍要看正文。每个选中平台至少入库 1 条，否则这轮标成未达标。</p>
+          {blocked && <p className="text-amber-900">所选平台里有未配置或未授权的来源，可以保存，不能从这里启动。</p>}
+          {error && <p role="alert" className="text-red-800">{error}</p>}
+        </div>
+        <div className="grid gap-2 border-t border-line p-4">
+          <Button aria-busy={busy} disabled={!canSave || busy || blocked} onClick={() => void submit(true)}>{busy ? "保存中…" : "保存并手动运行"}</Button>
+          <Button aria-busy={busy} variant="secondary" disabled={!canSave || busy} onClick={() => void submit(false)}>仅保存配置</Button>
+          <Link href="/radars" className="inline-flex min-h-11 items-center justify-center text-sm text-muted underline">返回抓单列表</Link>
+        </div>
+      </div>
+    </aside>
+    </div>
   </AppShell>;
 }
 

@@ -51,13 +51,16 @@ def deduplicate(items: list[RawItem]) -> tuple[list[RawItem], int]:
         if f"u:{url_digest}" in seen or f"c:{body_digest}" in seen:
             removed += 1
             continue
-        fingerprint = simhash_of(item)
+        # 招聘信号的说明文字几乎相同，SimHash 会把不同职位折成一条。
+        # 职位仍按 URL 和正文哈希去重，不同链接的职位都保留。
+        fingerprint = 0 if item.metadata.get("lead_kind") == "hiring_signal" else simhash_of(item)
         if fingerprint and any(hamming_distance(fingerprint, other) <= 12 for other in fingerprints):
             removed += 1
             continue
         seen.add(f"u:{url_digest}")
         seen.add(f"c:{body_digest}")
-        fingerprints.append(fingerprint)
+        if fingerprint:
+            fingerprints.append(fingerprint)
         unique.append(item)
     return unique, removed
 

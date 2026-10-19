@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUSINESS_PRESETS, buildLeadRadar, estimateHunt, groupHuntSources, platformQueries, selectAllAvailable, shortenDouyinKeyword, WECHAT_SCOPES, type HuntSource } from "../lib/lead-hunt";
+import { BUSINESS_PRESETS, buildLeadRadar, estimateHunt, groupHuntSources, HUNT_INTENT_GROUPS, HUNT_ROLE_GROUPS, platformQueries, selectAllAvailable, shortenDouyinKeyword, WECHAT_SCOPES, type HuntSource } from "../lib/lead-hunt";
 
 const catalog: HuntSource[] = [
   { id: "xiaohongshu", name: "小红书", available: true, status: "可运行 · 已实测", detail: "", provider: "tikhub", selectable: true, price_usd: 0.01, live_verified: true },
@@ -79,6 +79,10 @@ describe("平台级关键词适配", () => {
     expect(shortenDouyinKeyword("圣诞 视频 制作 求推荐")).toBe("圣诞");
     expect(shortenDouyinKeyword("找人做电商视频")).toBe("电商视频");
     expect(shortenDouyinKeyword("桂林 找人做视频")).toBe("视频");
+    expect(shortenDouyinKeyword("美国 找人做视频")).toBe("视频");
+    expect(shortenDouyinKeyword("广东 找人做视频")).toBe("视频");
+    expect(shortenDouyinKeyword("洛杉矶 找人做视频")).toBe("视频");
+    expect(shortenDouyinKeyword("加利福尼亚 找人做视频")).toBe("视频");
     const groups = platformQueries(["家居 找视频拍摄", "找人做电商视频"], ["douyin", "xiaohongshu"], ["深圳"]);
     expect(groups).toEqual([
       { source: "douyin", queries: ["家居", "电商视频"] },
@@ -117,5 +121,15 @@ describe("精简抓单请求", () => {
     const payload = buildLeadRadar(BUSINESS_PRESETS[0], ["xiaohongshu"], "找人做视频", 168, "", BUSINESS_PRESETS[0].terms, undefined, ["教程", "招聘", "承接"]);
     expect(payload.collection_policy.excluded_terms).toEqual(["教程", "招聘", "承接"]);
     expect(() => buildLeadRadar(BUSINESS_PRESETS[0], ["xiaohongshu"], "找人做视频", 168, "", BUSINESS_PRESETS[0].terms, undefined, Array.from({ length: 21 }, () => "词"))).toThrow("排除词");
+  });
+  it("自定义人群可以写入抓单条件", () => {
+    const payload = buildLeadRadar(BUSINESS_PRESETS[0], ["xiaohongshu"], "找人做视频", 168, "", undefined, { regions: [], roles: ["跨境卖家"], intents: [], match_mode: "remote" });
+    expect(JSON.parse(payload.source_config.hunt_conditions!).roles).toEqual(["跨境卖家"]);
+    expect(() => buildLeadRadar(BUSINESS_PRESETS[0], ["xiaohongshu"], "找人做视频", 168, "", undefined, { regions: [], roles: ["客"], intents: [], match_mode: "remote" })).toThrow("角色");
+  });
+  it("目标人群按商家、团队、个人分组，意图含询价", () => {
+    expect(HUNT_ROLE_GROUPS.map(group => group.label)).toEqual(["商家", "团队", "个人"]);
+    expect(HUNT_ROLE_GROUPS.flatMap(group => group.roles)).toContain("学生");
+    expect(HUNT_INTENT_GROUPS.flatMap(group => group.intents)).toContain("询价报价");
   });
 });

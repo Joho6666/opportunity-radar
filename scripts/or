@@ -41,8 +41,7 @@ BUSINESS_PRESETS = {
     "office": {"name": "PPT / Word / Excel", "terms": ["PPT", "Word", "Excel", "演示文稿", "表格", "文档"]},
     "workflow": {"name": "Skill / 工作流自动化", "terms": ["自动化", "工作流", "Skill", "Agent", "n8n"]},
 }
-HUNT_ROLES = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室"]
-HUNT_INTENTS = ["找人制作", "咨询方案", "长期合作"]
+HUNT_INTENTS = ["找人制作", "询价报价", "咨询方案", "长期合作"]
 MATCH_MODES = ("remote", "local", "keep_unknown")
 HOURS_CHOICES = (24, 72, 168, 720)
 MATCH_LABELS = {"strict": "严格匹配", "pending": "待确认", "mismatch": "不匹配"}
@@ -266,16 +265,16 @@ def build_radar_payload(args) -> dict:
         raise ValueError(f"--hours 必须是 {HOURS_CHOICES} 之一。")
     if args.match_mode not in MATCH_MODES:
         raise ValueError(f"--match-mode 必须是 {MATCH_MODES} 之一。")
-    for role in split_terms(args.roles):
-        if role not in HUNT_ROLES:
-            raise ValueError(f"--roles 仅支持：{'、'.join(HUNT_ROLES)}")
+    roles = split_terms(args.roles)
+    if len(roles) > 12 or any(len(role) < 2 or len(role) > 20 for role in roles):
+        raise ValueError("角色最多 12 个，每个 2–20 字。标准角色之外可填自定义人群。")
     for intent in split_terms(args.intents):
         if intent not in HUNT_INTENTS:
             raise ValueError(f"--intents 仅支持：{'、'.join(HUNT_INTENTS)}")
     regions = split_terms(args.regions)
     if len(regions) > 10 or any(len(region) > 20 for region in regions):
         raise ValueError("地区最多 10 个、每个 1–20 字。")
-    conditions: dict = {"regions": regions, "roles": split_terms(args.roles), "intents": split_terms(args.intents), "match_mode": args.match_mode}
+    conditions: dict = {"regions": regions, "roles": roles, "intents": split_terms(args.intents), "match_mode": args.match_mode}
     if args.start or args.end:
         if not (args.start and args.end):
             raise ValueError("--start 与 --end 必须成对提供（含时区的 ISO8601，例如 2026-10-10T00:00:00+08:00）。")

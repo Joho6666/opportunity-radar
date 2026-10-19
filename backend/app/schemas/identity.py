@@ -18,7 +18,7 @@ IDENTITY_BUSINESS_PRESETS = [
     {"id": "office", "name": "PPT / Word / Excel", "remote_deliverable": True, "match_words": ["PPT", "Word", "Excel", "演示文稿", "表格", "文档"]},
     {"id": "workflow", "name": "Skill / 工作流自动化", "remote_deliverable": True, "match_words": ["自动化", "工作流", "Skill", "Agent", "n8n"]},
 ]
-IDENTITY_ROLE_PRESETS = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室"]
+IDENTITY_ROLE_PRESETS = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室", "市场团队", "培训机构", "学生", "自由职业", "自媒体"]
 
 
 class IdentityBusiness(BaseModel):
@@ -58,5 +58,5 @@ class IdentityProfile(BaseModel):
         if unknown:
             raise ValueError("默认平台偏好包含未知来源")
         if self.service_mode == "regions" and not self.regions:
-            raise ValueError("指定省市交付时至少需要一个地区")
+            raise ValueError("指定地区交付时至少需要一个地区")
         return self

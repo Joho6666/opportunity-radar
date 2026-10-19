@@ -6,14 +6,13 @@
 由既有 filter_page 在采集阶段真实过滤。
 """
 import json
-from typing import get_args
 
 from ..core.errors import AppError
 from ..schemas.domain import RadarCreate
-from ..schemas.hunt import HuntConditions
+from ..schemas.hunt import HUNT_ROLE_PRESETS
 from ..schemas.identity import IdentityProfile
 
-HUNT_ROLE_VALUES = set(get_args(get_args(HuntConditions.model_fields["roles"].annotation)[0]))
+HUNT_ROLE_VALUES = set(HUNT_ROLE_PRESETS)
 
 
 def apply_identity_defaults(value: RadarCreate, identity: IdentityProfile | None) -> RadarCreate:
@@ -30,7 +29,7 @@ def apply_identity_defaults(value: RadarCreate, identity: IdentityProfile | None
     changed = dict(conditions)
     roles = [role for role in changed.get("roles") or []]
     if not roles:
-        roles = [role for role in identity.target_roles if role in HUNT_ROLE_VALUES][:5]
+        roles = [role for role in identity.target_roles if role in HUNT_ROLE_VALUES][:12]
         if roles:
             changed["roles"] = roles
     if not changed.get("regions") and identity.service_mode == "regions" and identity.regions:

@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button, Panel } from "@/components/ui";
+import { RegionPicker } from "@/features/region-picker";
 import { splitTerms } from "@/lib/collection-policy";
 import { localRequest } from "@/lib/local-edition";
 import { DEFAULT_IDENTITY, IDENTITY_BUSINESS_PRESETS, IDENTITY_FRESHNESS_CHOICES, IDENTITY_ROLE_PRESETS, IDENTITY_SOURCE_CHOICES, validateIdentity, type LocalIdentity } from "@/lib/identity";
+import { HUNT_ROLE_GROUPS } from "@/lib/lead-hunt";
 
 /** 个人身份设定：一次配置，新建抓单自动预填；服务端在保存抓单时同样补齐缺省条件。 */
 export function LocalIdentitySection() {
@@ -81,10 +83,10 @@ export function LocalIdentitySection() {
 
     <fieldset>
       <legend className="text-sm font-medium">目标客户角色（可多选 + 自定义）</legend>
-      <div className="mt-2 flex flex-wrap gap-4 text-sm">{IDENTITY_ROLE_PRESETS.map(role => <label key={role} className="flex items-center gap-2"><input type="checkbox" checked={identity.target_roles.includes(role)} onChange={() => update({ target_roles: identity.target_roles.includes(role) ? identity.target_roles.filter(item => item !== role) : [...identity.target_roles, role] })}/>{role}</label>)}
-        {identity.target_roles.filter(role => !IDENTITY_ROLE_PRESETS.includes(role)).map(role => <span key={role} className="flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs">{role}<button type="button" className="text-red-700 underline" onClick={() => update({ target_roles: identity.target_roles.filter(item => item !== role) })}>移除</button></span>)}</div>
+      <div className="mt-2 space-y-2">{HUNT_ROLE_GROUPS.map(group => <div key={group.label}><p className="text-xs text-muted">{group.label}</p><div className="mt-1 flex flex-wrap gap-4 text-sm">{group.roles.map(role => <label key={role} className="flex items-center gap-2"><input type="checkbox" checked={identity.target_roles.includes(role)} onChange={() => update({ target_roles: identity.target_roles.includes(role) ? identity.target_roles.filter(item => item !== role) : [...identity.target_roles, role] })}/>{role}</label>)}</div></div>)}
+        <div className="flex flex-wrap gap-2">{identity.target_roles.filter(role => !IDENTITY_ROLE_PRESETS.includes(role)).map(role => <span key={role} className="flex items-center gap-1 rounded bg-slate-100 px-2 py-1 text-xs">{role}<button type="button" className="text-red-700 underline" onClick={() => update({ target_roles: identity.target_roles.filter(item => item !== role) })}>移除</button></span>)}</div></div>
       <div className="mt-2 flex gap-2"><input value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="自定义角色，如：跨境卖家" aria-label="自定义角色" className={`${field} max-w-xs`}/><Button variant="secondary" onClick={() => { const role = customRole.trim(); if (!role) return; update({ target_roles: [...identity.target_roles, role] }); setCustomRole(""); }}>添加角色</Button></div>
-      <p className="mt-2 text-xs text-muted">角色以正文自述为准，不推断年龄与收入；抓单时只把能映射到现有枚举的角色写入条件，其余保留为你的业务参考。</p>
+      <p className="mt-2 text-xs text-muted">学生、自由职业、自媒体等只在对方自己写出身份时算命中，不凭年龄或昵称猜测。自定义角色会保留作参考，新建抓单只写入上面这些标准角色。</p>
     </fieldset>
 
     <fieldset>
@@ -92,10 +94,10 @@ export function LocalIdentitySection() {
       <div className="mt-2 flex flex-wrap gap-4 text-sm">
         <label className="flex items-center gap-2"><input type="radio" name="service-mode" checked={identity.service_mode === "remote"} onChange={() => update({ service_mode: "remote" })}/>远程优先（不限地区）</label>
         <label className="flex items-center gap-2"><input type="radio" name="service-mode" checked={identity.service_mode === "unspecified"} onChange={() => update({ service_mode: "unspecified" })}/>不限（保留未知）</label>
-        <label className="flex items-center gap-2"><input type="radio" name="service-mode" checked={identity.service_mode === "regions"} onChange={() => update({ service_mode: "regions" })}/>指定省市</label>
+        <label className="flex items-center gap-2"><input type="radio" name="service-mode" checked={identity.service_mode === "regions"} onChange={() => update({ service_mode: "regions" })}/>指定国家或地区</label>
       </div>
-      <label className="mt-3 block text-sm">地区（逗号分隔，最多10个）<input aria-label="服务地区" value={identity.regions.join("，")} onChange={e => update({ regions: splitTerms(e.target.value) })} placeholder="例如：深圳，广州" className={field}/></label>
-      <p className="mt-2 text-xs text-muted">指定省市时，新建抓单默认地域为这些地区；确认不可远程的业务后默认按“严格本地”匹配。</p>
+      <div className="mt-3"><RegionPicker value={identity.regions} onChange={regions => update({ regions })}/></div>
+      <p className="mt-2 text-xs text-muted">指定国家或地区时，新建抓单默认带上这些地点；确认不可远程的业务后默认按“严格本地”匹配。</p>
     </fieldset>
 
     <div className="grid gap-4 sm:grid-cols-2">

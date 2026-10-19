@@ -58,6 +58,48 @@ def test_original_evidence_unknown_role_not_guessed_from_author_or_query():
     assert match["evidence_level"]=="搜索摘要（未核实完整正文）"
 
 
+def test_overseas_country_counts_only_in_service_context_including_english_alias():
+    from app.services.hunt_conditions import assess_hunt, shorten_douyin_keyword
+    item = RawItem(external_id="1", title="美国站", content="我们在美国做亚马逊，找人做产品视频", source="xiaohongshu", url="https://example.org/us", published_at=datetime.now(UTC))
+    match = assess_hunt(item, radar(regions=["美国"], roles=[], intents=[]))
+    assert "美国" in match["evidence"]["需求地区"]
+    english = item.model_copy(update={"title": "video editor", "content": "Looking for a video editor for the US market. We need a team."})
+    assert "US" in assess_hunt(english, radar(regions=["美国"], roles=[], intents=[]))["evidence"]["需求地区"]
+    alias = item.model_copy(update={"title": "找视频", "content": "服务地点：美国，找人做视频"})
+    assert "美国" in assess_hunt(alias, radar(regions=["USA"], roles=[], intents=[]))["evidence"]["需求地区"]
+    unrelated = item.model_copy(update={"title": "找视频", "content": "看到一个美国博主，另外找人做视频", "metadata": {"query": "美国"}})
+    assert "需求地区" in assess_hunt(unrelated, radar(regions=["美国"], roles=[], intents=[]))["missing"]
+    assert shorten_douyin_keyword("美国 找人做视频") == "视频"
+    assert shorten_douyin_keyword("广东 找人做视频") == "视频"
+    assert shorten_douyin_keyword("洛杉矶 找人做视频") == "视频"
+    assert shorten_douyin_keyword("加利福尼亚 找人做视频") == "视频"
+
+
+def test_personas_and_quote_intent_count_only_from_self_description():
+    from app.services.hunt_conditions import assess_hunt
+    item = RawItem(external_id="1", title="找视频", content="我是大学生，找人做毕业视频", source="xiaohongshu", url="https://example.org/student", published_at=datetime.now(UTC))
+    assert "大学生" in assess_hunt(item, radar(roles=["学生"], intents=[]))["evidence"]["目标角色"]
+    assert "目标角色" in assess_hunt(item.model_copy(update={"content": "招生啦，适合学生学视频", "author": "学生"}), radar(roles=["学生"], intents=[]))["missing"]
+    assert "自由职业" in assess_hunt(item.model_copy(update={"content": "本人是自由职业，想找人剪一条视频"}), radar(roles=["自由职业"], intents=[]))["evidence"]["目标角色"]
+    assert "自媒体" in assess_hunt(item.model_copy(update={"content": "我们是自媒体，求视频制作"}), radar(roles=["自媒体"], intents=[]))["evidence"]["目标角色"]
+    assert "市场部" in assess_hunt(item.model_copy(update={"content": "我们市场部需要一条产品视频"}), radar(roles=["市场团队"], intents=[]))["evidence"]["目标角色"]
+    assert "培训机构" in assess_hunt(item.model_copy(update={"content": "我们是培训机构，找人做课程视频"}), radar(roles=["培训机构"], intents=[]))["evidence"]["目标角色"]
+    quoted = assess_hunt(item.model_copy(update={"content": "产品视频怎么收费"}), radar(roles=[], intents=["询价报价"]))
+    assert "怎么收费" in quoted["evidence"]["需求意图"]
+    assert "买方需求" in quoted["evidence"]
+    seller = assess_hunt(item.model_copy(update={"content": "报价私信，欢迎咨询，我们提供视频服务"}), radar(roles=[], intents=["询价报价"]))
+    assert seller["status"] == "mismatch"
+    assert "需求意图" not in seller["evidence"]
+
+
+def test_custom_audience_matches_only_when_they_state_it():
+    from app.services.hunt_conditions import assess_hunt
+    item = RawItem(external_id="1", title="找视频", content="我们是跨境卖家，找人做产品视频", source="xiaohongshu", url="https://example.org/custom", published_at=datetime.now(UTC))
+    assert "跨境卖家" in assess_hunt(item, radar(roles=["跨境卖家"], intents=[]))["evidence"]["目标角色"]
+    mentioned = item.model_copy(update={"content": "想找跨境卖家做视频", "author": "跨境卖家"})
+    assert "目标角色" in assess_hunt(mentioned, radar(roles=["跨境卖家"], intents=[]))["missing"]
+
+
 def test_remote_unknown_region_retained_and_seller_not_strict():
     from app.services.hunt_conditions import assess_hunt
     item=RawItem(external_id="1",title="找外包",content="我们是电商商家，找人做视频，可长期合作",source="xiaohongshu",url="https://example.org/1",published_at=datetime.now(UTC))
@@ -76,7 +118,7 @@ def test_custom_window_and_unknown_time_never_strict():
     assert assess_hunt(item.model_copy(update={"published_at":datetime(2026,10,3,tzinfo=UTC)}),r)["status"]=="mismatch"
 
 
-@pytest.mark.parametrize("change", [{"roles":["富人"]},{"regions":["a"]*11},{"start_at":"2026-10-02T00:00:00Z","end_at":"2026-10-01T00:00:00Z"},{"match_mode":"bogus"}])
+@pytest.mark.parametrize("change", [{"roles":["人"]},{"regions":["a"]*11},{"start_at":"2026-10-02T00:00:00Z","end_at":"2026-10-01T00:00:00Z"},{"match_mode":"bogus"}])
 def test_json_conditions_validate_at_api_boundary(change):
     with pytest.raises(ValueError):
         radar(**change)

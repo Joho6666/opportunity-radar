@@ -20,9 +20,18 @@ def filter_page(items, policy, *, freshness_hours, now=None):
             continue
         # 招聘信号是另一类线索：用户选的“买方业务词”不应否决职位结果；
         # 否则 Video Editor 会因正文没有“电商/广告”等词而全部丢掉。
+        # 排除词只对照职位本身（标题、公司、职位名），不对照我们追加的“招聘信号”说明，
+        # 否则身份里的排除词「招聘」会把整页 LinkedIn 结果丢掉。
         is_hiring_signal = item.metadata.get("lead_kind") == "hiring_signal"
         hits = [] if is_hiring_signal else [term.casefold() in text for term in policy.required_terms]
-        if any(term.casefold() in text for term in policy.excluded_terms) or (hits and not (all(hits) if policy.match_mode == "all" else any(hits))):
+        if is_hiring_signal:
+            exclude_text = "\n".join(str(field) for field in (
+                item.title, item.metadata.get("company"), item.metadata.get("job_title"),
+                item.metadata.get("location"), item.metadata.get("salary"), item.metadata.get("remote"),
+            ) if field).casefold()
+        else:
+            exclude_text = text
+        if any(term.casefold() in exclude_text for term in policy.excluded_terms) or (hits and not (all(hits) if policy.match_mode == "all" else any(hits))):
             counts["terms"] += 1
             continue
         recent = bool(selected_time)
