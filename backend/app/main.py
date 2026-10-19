@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 from uuid import uuid4
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from .api import billing, briefs, dashboard, intelligence, local, opportunities, pipeline, profile, radars, skills
+from .api import agent, billing, briefs, dashboard, intelligence, local, opportunities, pipeline, profile, radars, skills
 from .core.config import get_settings
 from .core.errors import AppError, app_error_handler
 
@@ -52,12 +54,22 @@ settings = get_settings()
 app = FastAPI(title="Opportunity Radar API", version="0.1.0", description="Opportunity Engine backend", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_exception_handler(AppError, app_error_handler)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """Agent 接口也返回稳定的 {error:{code,message}} 结构；其余路由保持 FastAPI 默认 422。"""
+    if request.url.path.startswith("/api/agent"):
+        return await agent.agent_request_validation_handler(request, exc)
+    return await request_validation_exception_handler(request, exc)
+
+
 @app.middleware("http")
 async def request_id(request: Request, call_next):
     response = await call_next(request); response.headers["X-Request-ID"] = request.headers.get("X-Request-ID", str(uuid4())); return response
 @app.get("/health", tags=["Health"])
 async def health(): return {"status":"ok"}
-for router in (billing.router, profile.router, radars.router, opportunities.router, skills.router, pipeline.router, briefs.router, dashboard.router, intelligence.router, local.router): app.include_router(router)
+for router in (billing.router, profile.router, radars.router, opportunities.router, skills.router, pipeline.router, briefs.router, dashboard.router, intelligence.router, local.router, agent.router): app.include_router(router)
 
 
 @app.get("/ready",tags=["Health"])

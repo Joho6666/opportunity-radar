@@ -60,7 +60,7 @@ load_private_config() {
   "$py" - "$LOCAL_ENV" "$RUNTIME_ENV" "$RUNTIME_ROOT" "$APP_HOME" "$py" "$(node_bin)" <<'PY'
 from pathlib import Path
 from urllib.parse import urlsplit
-import os, secrets, sys
+import os, sys
 source, target, root, home = map(Path, sys.argv[1:5])
 python_executable, node_executable = sys.argv[5:7]
 values = {}
@@ -84,15 +84,14 @@ if len(values['LOCAL_PROXY_TOKEN']) < 64 or len(values['LOCAL_SESSION_SECRET']) 
 api_port = values.get('LOCAL_API_PORT', '8015')
 ui_port = values.get('LOCAL_UI_PORT', '3004')
 origin = f'http://localhost:{ui_port}'
-pair_file = home/'config'/'pairing.ticket'
 service = {
  'APP_ENV':'local','DATABASE_URL':values['LOCAL_DATABASE_URL'],'REDIS_URL':values['LOCAL_REDIS_URL'],
  'USE_IN_MEMORY_STORE':'false','AUTH_DISABLED':'false','LOCAL_USER_ID':values['LOCAL_USER_ID'],
  'LOCAL_PROXY_TOKEN':values['LOCAL_PROXY_TOKEN'],'LOCAL_SESSION_SECRET':values['LOCAL_SESSION_SECRET'],
  'LOCAL_API_PORT':api_port,'LOCAL_API_BASE_URL':f'http://127.0.0.1:{api_port}',
  'LOCAL_UI_PORT':ui_port,'LOCAL_UI_ORIGIN':origin,
- 'LOCAL_PAIRING_TOKEN_PATH':str(pair_file),'LOCAL_PAIRED_MARKER_PATH':str(home/'config'/'paired.marker'),
  'LOCAL_RUNTIME_DIR':str(home/'run'),
+ 'LOCAL_PRIVATE_CONFIG_DIR':str(home/'config'),
  'CORS_ORIGINS':origin,'INCLUDE_MOCK_COLLECTOR':'false','PAID_API_ENABLED':'false',
  'ENABLE_AI_CLASSIFICATION':'false','LOCAL_CLASSIFIER_MODE':'off','LOCAL_CLASSIFIER_PATH':'',
  'ALLOW_RETENTION_DELETE':'false','TIKHUB_API_KEY':'','FIRECRAWL_API_KEY':'','LLM_API_KEY':'',
@@ -102,6 +101,28 @@ service = {
  'LOCAL_PYTHON_EXECUTABLE':python_executable,'LOCAL_NODE_EXECUTABLE':node_executable,
  'NODE_ENV':'production','NEXT_BUILD_DIR':'.next-local','PATH':'/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
 }
+# Only this explicit opt-in is imported; other development providers stay blank.
+manual = values.get('LOCAL_MANUAL_TIKHUB_ENABLED', 'false').lower() == 'true'
+service['LOCAL_MANUAL_TIKHUB_ENABLED'] = str(manual).lower()
+if manual:
+    if not values.get('TIKHUB_API_KEY'): raise SystemExit('手动 TikHub 已启用但未配置密钥。')
+    service.update({
+        'PAID_API_ENABLED':'true', 'TIKHUB_API_KEY':values['TIKHUB_API_KEY'],
+        'TIKHUB_BASE_URL':values.get('TIKHUB_BASE_URL','https://api.tikhub.io'),
+        'TIKHUB_ENDPOINT_PRICES_JSON':values.get('TIKHUB_ENDPOINT_PRICES_JSON','{}'),
+        'TIKHUB_PRICE_RECEIPTS_JSON':values.get('TIKHUB_PRICE_RECEIPTS_JSON','{}'),
+        'PAID_DAILY_COST_LIMIT':values.get('PAID_DAILY_COST_LIMIT','1'),
+        'PAID_DAILY_REQUEST_LIMIT':values.get('PAID_DAILY_REQUEST_LIMIT','20'),
+        'ALLOW_FAKE_IP_DNS':values.get('ALLOW_FAKE_IP_DNS','false'),
+    })
+    from urllib.parse import urlsplit
+    if service['TIKHUB_BASE_URL'] not in ('https://api.tikhub.io','https://api.tikhub.dev'):
+        raise SystemExit('TikHub 必须使用官方 HTTPS 地址。')
+    from decimal import Decimal
+    if not Decimal('0') < Decimal(service['PAID_DAILY_COST_LIMIT']) <= Decimal('1'):
+        raise SystemExit('本机手动采集每日费用上限必须不超过 USD 1。')
+    if not 1 <= int(service['PAID_DAILY_REQUEST_LIMIT']) <= 20:
+        raise SystemExit('本机手动采集每日最多20请求。')
 for key in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','http_proxy','https_proxy','all_proxy','no_proxy'):
     if os.environ.get(key): service[key] = os.environ[key]
 target.parent.mkdir(parents=True, exist_ok=True); os.chmod(target.parent, 0o700)
@@ -232,7 +253,7 @@ start() {
   fi
   status
   printf '\n工作台地址：http://localhost:%s\n' "$ui_port"
-  if [[ ! -f "$APP_HOME/config/paired.marker" ]]; then printf '首次使用请在本机终端运行：scripts/local.sh pair\n'; fi
+  printf '直接打开即可使用，无需配对码。\n'
 }
 
 stop() {
@@ -299,11 +320,7 @@ restore_test() {
 }
 
 pair() {
-  require_config
-  local token digest expiry
-  token="$(openssl rand -hex 32)"; digest="$(printf '%s' "$token" | shasum -a 256 | awk '{print $1}')"; expiry="$(( $(date +%s) * 1000 + 600000 ))"
-  umask 077; printf '%s\n%s\n' "$digest" "$expiry" > "$CONFIG_DIR/pairing.ticket"; chmod 600 "$CONFIG_DIR/pairing.ticket"
-  printf '一次性配对码（10 分钟有效，立即在本机浏览器输入）：\n%s\n' "$token"
+  printf '本机配对已移除，请直接打开 http://localhost:3004（无需配对码）。\n'
 }
 
 logs() {

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     local_classifier_mode: Literal["off","shadow","active"] = "shadow"
     local_classifier_path: str = ""  # Trusted local model directory, never a Hub ID or user request input.
     paid_api_enabled: bool = False
+    local_manual_tikhub_enabled: bool = False  # Explicit local opt-in; never permits scheduled/AI calls.
     paid_daily_cost_limit: float = Field(default=1.0,gt=0,allow_inf_nan=False)
     paid_daily_request_limit: int = Field(default=20,ge=1,le=100000)
     paid_batch_id: str = ""  # Server-selected cumulative authorization; never reset per run/day.
@@ -71,8 +72,20 @@ class Settings(BaseSettings):
 
 
 @lru_cache
-def get_settings() -> Settings:
+def _settings() -> Settings:
     return Settings()
+
+
+def get_settings() -> Settings:
+    """进程内唯一 settings 单例；每次调用叠加本机私密 Provider 配置（如有）。
+
+    叠加只针对 APP_ENV=local，且以文件 mtime/size 做缓存：界面保存密钥或预算后
+    API 与 worker 的下一次 get_settings() 即生效，无需重启服务。
+    """
+    settings = _settings()
+    from .provider_config import apply_provider_overlay
+    apply_provider_overlay(settings)
+    return settings
 
 
 def validate_runtime() -> None:
@@ -94,7 +107,7 @@ def validate_runtime() -> None:
             UUID(settings.local_user_id)
         except ValueError as exc:
             raise RuntimeError("APP_ENV=local requires a valid LOCAL_USER_ID UUID") from exc
-        if settings.paid_api_enabled or settings.enable_ai_classification or settings.local_classifier_mode != "off" or settings.allow_retention_delete:
+        if (settings.paid_api_enabled and not (settings.local_manual_tikhub_enabled and settings.tikhub_api_key)) or settings.enable_ai_classification or settings.local_classifier_mode != "off" or settings.allow_retention_delete:
             raise RuntimeError("APP_ENV=local requires paid APIs, automatic AI, local model loading, and retention deletion to remain disabled")
         if os.getenv("INCLUDE_MOCK_COLLECTOR", "false").strip().lower() not in {"false", "0", "no", "off", ""}:
             raise RuntimeError("APP_ENV=local disallows mock collectors")

@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""Opportunity Radar 本机 Agent 命令行（给 agent 与人共用；仅依赖 Python 标准库）。
+
+- 只连本机 loopback API：默认 http://127.0.0.1:<LOCAL_API_PORT>（读本机私密配置），
+  可用 --api-base 或环境变量 OR_AGENT_API_BASE 覆盖。
+- 令牌来源优先级：--token > 环境变量 OR_AGENT_TOKEN > 本机私密配置 agent-token.json。
+  命令行绝不打印令牌明文（token 子命令只显示掩码与状态）。
+- --json 输出稳定的机器可读结构：{"ok", "http_status", "request_id", "data"|"error"}。
+- 退出码：0 成功 / 1 其他错误（网络或服务不可用）/ 2 参数错误 / 3 未鉴权 / 4 受限被拒。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import uuid
+from pathlib import Path
+
+EXIT_OK, EXIT_OTHER, EXIT_USAGE, EXIT_UNAUTHORIZED, EXIT_REFUSED = 0, 1, 2, 3, 4
+
+AUTH_CODES = {
+    "AGENT_TOKEN_REQUIRED", "AGENT_TOKEN_INVALID", "AGENT_TOKEN_MISSING", "AGENT_LOCAL_ONLY", "AGENT_API_LOCAL_ONLY",
+    "UNAUTHORIZED", "INVALID_TOKEN", "LOCAL_AUTH_MISCONFIGURED", "LOCAL_HOST_REJECTED", "LOCAL_PROXY_AUTH_REQUIRED",
+    "LOCAL_MODE_REMOTE_FORBIDDEN",
+}
+POLICY_CODES = {
+    "CONFIRM_REQUIRED", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_REQUIRED",
+    "PAID_CALL_UNAUTHORIZED", "PAID_API_DISABLED", "PAID_QUOTA_EXHAUSTED", "PAID_BATCH_UNAUTHORIZED", "PAID_BATCH_EXHAUSTED",
+    "PAID_PRICE_REQUIRED", "BILLING_PRICE_REQUIRED", "BILLING_PERSISTENCE_REQUIRED", "LOCAL_REQUEST_COST_LIMIT",
+    "LOCAL_REDIS_REQUIRED", "LOCAL_PROVIDER_DISABLED", "SCHEDULED_PAID_DISABLED", "LOCAL_SCHEDULED_PAID_DISABLED",
+    "PROVIDER_KEY_MISSING", "PROVIDER_KEY_SOURCE_ENV", "LOCAL_MANUAL_TIKHUB_DISABLED",
+}
+
+BUSINESS_PRESETS = {
+    "video": {"name": "AI 电商视频 / 广告", "terms": ["电商", "商品", "带货", "广告", "产品视频", "信息流", "视频素材", "亚马逊", "AI视频", "视频生成"]},
+    "drama": {"name": "视频复刻 / AI 短剧", "terms": ["复刻", "短剧", "视频", "AI剧"]},
+    "web": {"name": "小程序 / 网站轻开发", "terms": ["小程序", "网站", "网页", "落地页", "官网"]},
+    "office": {"name": "PPT / Word / Excel", "terms": ["PPT", "Word", "Excel", "演示文稿", "表格", "文档"]},
+    "workflow": {"name": "Skill / 工作流自动化", "terms": ["自动化", "工作流", "Skill", "Agent", "n8n"]},
+}
+HUNT_ROLES = ["电商商家", "品牌方", "实体店", "创业者", "代运营工作室"]
+HUNT_INTENTS = ["找人制作", "咨询方案", "长期合作"]
+MATCH_MODES = ("remote", "local", "keep_unknown")
+HOURS_CHOICES = (24, 72, 168, 720)
+MATCH_LABELS = {"strict": "严格匹配", "pending": "待确认", "mismatch": "不匹配"}
+
+
+def app_home() -> Path:
+    return Path(os.environ.get("OPPORTUNITY_RADAR_HOME") or (Path.home() / "Library" / "Application Support" / "Opportunity Radar"))
+
+
+def config_dir() -> Path:
+    return Path(os.environ.get("LOCAL_PRIVATE_CONFIG_DIR") or (app_home() / "config"))
+
+
+def token_file() -> Path:
+    return Path(os.environ.get("OR_AGENT_TOKEN_PATH") or (config_dir() / "agent-token.json"))
+
+
+def read_local_env() -> dict:
+    values: dict[str, str] = {}
+    target = config_dir() / "local.env"
+    try:
+        text = target.read_text()
+    except OSError:
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip("\"'")
+    return values
+
+
+def default_api_base() -> str:
+    explicit = os.environ.get("OR_AGENT_API_BASE")
+    if explicit:
+        return explicit.rstrip("/")
+    port = read_local_env().get("LOCAL_API_PORT", "8015")
+    return f"http://127.0.0.1:{port}"
+
+
+def load_token(explicit: str | None) -> tuple[str, str, str]:
+    """返回 (token, 来源, 文件的 created_at)。来源：arg / env / file / none。"""
+    if explicit:
+        return explicit, "arg", ""
+    env_token = os.environ.get("OR_AGENT_TOKEN")
+    if env_token:
+        return env_token, "env", ""
+    target = token_file()
+    try:
+        payload = json.loads(target.read_text())
+    except (OSError, ValueError):
+        return "", "none", ""
+    token = payload.get("token") or ""
+    return (token, "file", payload.get("created_at") or "") if token else ("", "none", "")
+
+
+def mask_token(token: str) -> str:
+    if not token:
+        return ""
+    if len(token) <= 18:
+        return token[:9] + "***"
+    return f"{token[:10]}***{token[-4:]}"
+
+
+class ServiceUnavailable(Exception):
+    pass
+
+
+def http_json(api_base: str, method: str, path: str, *, token: str = "", payload=None, idempotency_key: str | None = None, request_id: str | None = None, timeout: float = 60.0):
+    url = f"{api_base.rstrip('/')}{path}"
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    headers = {"Accept": "application/json", "X-Request-ID": request_id or str(uuid.uuid4())}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+            return response.status, json.loads(raw or "null"), dict(response.headers)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8")
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = {"error": {"code": "HTTP_ERROR", "message": raw[:300] or f"HTTP {exc.code}"}}
+        return exc.code, body, dict(exc.headers)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise ServiceUnavailable(f"无法连接本机 Agent API（{url}）：{exc}。请确认已执行 scripts/local.sh start。") from exc
+
+
+def exit_code_for(status: int, code: str) -> int:
+    if status == 401 or code in AUTH_CODES:
+        return EXIT_UNAUTHORIZED
+    if status == 403:
+        return EXIT_REFUSED
+    if status in (400, 422):
+        return EXIT_REFUSED if code in POLICY_CODES else EXIT_USAGE
+    if status == 404:
+        return EXIT_USAGE
+    if status in (409, 429):
+        return EXIT_REFUSED
+    return EXIT_OTHER if status >= 400 else EXIT_OK
+
+
+class Tool:
+    def __init__(self, args):
+        self.args = args
+        self.api_base = (args.api_base or default_api_base()).rstrip("/")
+        self.token, self.token_source, self.token_created = load_token(args.token)
+        self.json_mode = bool(getattr(args, "json", False))
+        self.request_id = getattr(args, "request_id", None) or str(uuid.uuid4())
+        self.timeout = getattr(args, "timeout", 60.0)
+        self.request_count = 0
+
+    # ---- 输出 ----
+    def emit(self, payload, *, ok=True, status=200, human=None):
+        if self.json_mode:
+            envelope = {"ok": ok, "http_status": status, "request_id": self.request_id, "api_base": self.api_base}
+            envelope["data" if ok else "error"] = payload
+            print(json.dumps(envelope, ensure_ascii=False, indent=2))
+            return
+        if human is not None:
+            print(human)
+        elif ok:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def fail(self, status: int, body, *, human: str | None = None) -> int:
+        error = (body or {}).get("error") or {}
+        code = error.get("code", "HTTP_ERROR")
+        message = error.get("message") or human or f"HTTP {status}"
+        if self.json_mode:
+            print(json.dumps({"ok": False, "http_status": status, "request_id": self.request_id, "api_base": self.api_base, "error": {"code": code, "message": message}}, ensure_ascii=False, indent=2))
+        else:
+            print(f"错误[{code}] {message}", file=sys.stderr)
+        return exit_code_for(status, code)
+
+    # ---- 请求 ----
+    def call(self, method: str, path: str, *, payload=None, write=False):
+        self.request_count += 1
+        key = None
+        if write:
+            key = self.args.idempotency_key or f"or-cli-{uuid.uuid4()}"
+        return http_json(self.api_base, method, path, token=self.token, payload=payload, idempotency_key=key, request_id=self.request_id, timeout=self.timeout)
+
+    def require_token(self) -> int | None:
+        if self.token:
+            return None
+        message = "未找到 Agent 令牌：请先在设置页生成，或用 --token / OR_AGENT_TOKEN 提供。"
+        if self.json_mode:
+            print(json.dumps({"ok": False, "http_status": 401, "request_id": self.request_id, "api_base": self.api_base, "error": {"code": "AGENT_TOKEN_MISSING", "message": message}}, ensure_ascii=False, indent=2))
+        else:
+            print(f"错误[AGENT_TOKEN_MISSING] {message}", file=sys.stderr)
+        return EXIT_UNAUTHORIZED
+
+
+# ---- 命令 ----
+
+def cmd_sources(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    status, body, _ = tool.call("GET", "/api/agent/sources")
+    if status != 200:
+        return tool.fail(status, body)
+    items = body.get("items", [])
+    lines = [f"平台目录：{len(items)} 个平台 · 目录版本 {body.get('catalog_version', '?')} · 已实测 {sum(1 for i in items if i.get('live_verified'))} 个",
+             f"{'ID':<14}{'名称':<20}{'可用':<6}{'已实测':<8}{'单价USD':<9}状态"]
+    for item in items:
+        price = item.get("price_usd")
+        lines.append(f"{str(item.get('id','')):<14}{str(item.get('name',''))[:18]:<20}{'是' if item.get('available') else '否':<6}{'是' if item.get('live_verified') else '否':<8}{(str(price) if price is not None else '-'):<9}{item.get('status','')}")
+    lines.append(f"请求 ID：{tool.request_id}")
+    tool.emit(body, status=status, human="\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_identity(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    if tool.args.set_file:
+        try:
+            payload = json.loads(Path(tool.args.set_file).read_text())
+        except (OSError, ValueError) as exc:
+            print(f"错误[USAGE] 身份文件不可读或不是合法 JSON：{exc}", file=sys.stderr)
+            return EXIT_USAGE
+        status, body, _ = tool.call("PUT", "/api/agent/identity", payload=payload, write=True)
+        if status != 200:
+            return tool.fail(status, body)
+        tool.emit(body, status=status, human=f"身份设定已保存：{json.dumps(body.get('identity', {}), ensure_ascii=False)}")
+        return EXIT_OK
+    status, body, _ = tool.call("GET", "/api/agent/identity")
+    if status != 200:
+        return tool.fail(status, body)
+    identity = body.get("identity")
+    human = "个人身份设定：未设置（可在页面设置或用 identity --set-file 写入）" if not identity else f"个人身份设定：\n{json.dumps(identity, ensure_ascii=False, indent=2)}"
+    tool.emit(body, status=status, human=human)
+    return EXIT_OK
+
+
+def split_terms(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [term.strip() for term in value.replace("，", ",").replace("、", ",").split(",") if term.strip()]
+
+
+def build_radar_payload(args) -> dict:
+    preset = BUSINESS_PRESETS[args.business]
+    keywords = split_terms(args.keywords)
+    sources = split_terms(args.sources)
+    if not keywords:
+        raise ValueError("请用 --keywords 提供 1–3 个买方关键词（逗号/、分隔；含空格的整体短语视为一个关键词）。")
+    if len(keywords) > 3:
+        raise ValueError("抓单最多 3 个关键词。")
+    if not sources or len(sources) > 6:
+        raise ValueError("请用 --sources 提供 1–6 个平台。")
+    if len(keywords) * len(sources) > 6:
+        raise ValueError("关键词 × 平台 不能超过 6 次首屏请求。")
+    if args.hours not in HOURS_CHOICES:
+        raise ValueError(f"--hours 必须是 {HOURS_CHOICES} 之一。")
+    if args.match_mode not in MATCH_MODES:
+        raise ValueError(f"--match-mode 必须是 {MATCH_MODES} 之一。")
+    for role in split_terms(args.roles):
+        if role not in HUNT_ROLES:
+            raise ValueError(f"--roles 仅支持：{'、'.join(HUNT_ROLES)}")
+    for intent in split_terms(args.intents):
+        if intent not in HUNT_INTENTS:
+            raise ValueError(f"--intents 仅支持：{'、'.join(HUNT_INTENTS)}")
+    regions = split_terms(args.regions)
+    if len(regions) > 10 or any(len(region) > 20 for region in regions):
+        raise ValueError("地区最多 10 个、每个 1–20 字。")
+    conditions: dict = {"regions": regions, "roles": split_terms(args.roles), "intents": split_terms(args.intents), "match_mode": args.match_mode}
+    if args.start or args.end:
+        if not (args.start and args.end):
+            raise ValueError("--start 与 --end 必须成对提供（含时区的 ISO8601，例如 2026-10-10T00:00:00+08:00）。")
+        conditions["start_at"], conditions["end_at"] = args.start, args.end
+    excluded = split_terms(args.exclude)
+    return {
+        "name": args.name or f"{preset['name']} · 抓单",
+        "goal": args.goal or f"寻找需要{preset['name']}服务的买方公开需求",
+        "mode": "general",
+        "minimum_budget": 0,
+        "frequency": "manual",
+        "local_schedule_enabled": False,
+        "freshness_hours": args.hours,
+        "keywords": keywords,
+        "sources": sources,
+        "locations": [],
+        "listener_description": "",
+        "source_config": {"lead_hunt": "true", "business": args.business, "freshness_hours": str(args.hours), "hunt_conditions": json.dumps(conditions, ensure_ascii=False)},
+        "collection_policy": {"required_terms": preset["terms"], "excluded_terms": excluded, "match_mode": "any", "time_basis": "published", "include_unknown_dates": False, "sort": "latest", "activity_filter": "any", "min_interactions": 0},
+    }
+
+
+def cmd_new(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    try:
+        payload = build_radar_payload(tool.args)
+    except ValueError as exc:
+        print(f"错误[USAGE] {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    status, body, _ = tool.call("POST", "/api/agent/radars", payload=payload, write=True)
+    if status != 201:
+        return tool.fail(status, body)
+    radar = body.get("radar", {})
+    human = (f"已创建抓单雷达：\n  ID：{radar.get('id')}\n  名称：{radar.get('name')}\n  关键词：{'、'.join(radar.get('keywords', []))} · 平台：{'、'.join(radar.get('sources', []))}"
+             f"\n  时间窗口：最近 {radar.get('freshness_hours')} 小时 · 匹配模式：{(radar.get('hunt_conditions') or {}).get('match_mode')}\n  下一步：scripts/or run {radar.get('id')} --confirm\n请求 ID：{tool.request_id}")
+    tool.emit(body, status=status, human=human)
+    return EXIT_OK
+
+
+def cmd_run(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    if not tool.args.confirm:
+        print("错误[USAGE] 运行会触发真实付费采集，必须显式加 --confirm。", file=sys.stderr)
+        return EXIT_USAGE
+    status, body, _ = tool.call("POST", f"/api/agent/radars/{tool.args.radar_id}/run", payload={"confirm": True}, write=True)
+    if status != 202:
+        return tool.fail(status, body)
+    run = body.get("run", {})
+    billing = body.get("billing", {})
+    human = (f"已派发运行（手动 · 单轮计费）：\n  运行 ID：{run.get('id')}\n  雷达 ID：{run.get('radar_id')}\n  状态：{run.get('status')}"
+             f"\n  本轮预算：≤ USD {billing.get('single_run_limit_usd')} · 每日 ≤ USD {billing.get('daily_limit_usd')} / {billing.get('daily_request_limit')} 请求 · 自动调度：{'否' if billing.get('allow_scheduled') is False else '未知'}"
+             f"\n  下一步：scripts/or results {run.get('radar_id')} --json\n请求 ID：{tool.request_id}")
+    tool.emit(body, status=status, human=human)
+    return EXIT_OK
+
+
+def cmd_results(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    query = f"?limit={tool.args.limit}&offset={tool.args.offset}" + (f"&status={tool.args.status}" if tool.args.status else "")
+    status, body, _ = tool.call("GET", f"/api/agent/radars/{tool.args.radar_id}/results{query}")
+    if status != 200:
+        return tool.fail(status, body)
+    items = body.get("items", [])
+    page = body.get("page", {})
+    lines = [f"结果（{page.get('count', 0)} 条 · 偏移 {page.get('offset', 0)} · 还有更多：{'是' if page.get('has_more') else '否'}）："]
+    for item in items:
+        match = item.get("match") or {}
+        label = match.get("label") or "未分类"
+        title = (item.get("title") or (item.get("raw_text") or "").splitlines()[0] if item.get("raw_text") else "") or "(无标题)"
+        lines.append(f"- [{label} · 相关度 {match.get('score')}] {item.get('source')} · {item.get('published_at_shanghai') or '时间未知'}")
+        lines.append(f"  {title[:60]}")
+        lines.append(f"  {item.get('url')}")
+    if not items:
+        lines.append("（该雷达还没有结果：先运行一轮抓取，或等待已派发的运行完成。）")
+    lines.append(f"请求 ID：{tool.request_id}")
+    tool.emit(body, status=status, human="\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_runs(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    query = f"?limit={tool.args.limit}" + (f"&radar_id={tool.args.radar}" if tool.args.radar else "")
+    status, body, _ = tool.call("GET", f"/api/agent/runs{query}")
+    if status != 200:
+        return tool.fail(status, body)
+    rows = body.get("items", [])
+    lines = [f"最近运行（{len(rows)} 条）：", f"{'运行 ID':<38}{'状态':<10}{'开始（上海）':<22}{'命中':<6}雷达"]
+    for run in rows:
+        stats = run.get("stats") or {}
+        lines.append(f"{str(run.get('id')):<38}{str(run.get('status')):<10}{str(run.get('started_at_shanghai') or '-'):<22}{str(stats.get('items_found', '-')):<6}{run.get('radar_id')}")
+    tool.emit(body, status=status, human="\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_status(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    status, body, _ = tool.call("GET", "/api/agent/billing/status")
+    if status != 200:
+        return tool.fail(status, body)
+    authorizations = body.get("authorizations") or []
+    lines = [f"付费开关：{'开启' if body.get('paid_api_enabled') else '关闭'} · 今日请求：{body.get('requests_today', 0)}",
+             f"今日预留：USD {body.get('reserved_cost_usd', 0)} · 已消费：USD {body.get('consumed_cost_usd', body.get('reserved_cost_usd', 0))}",
+             f"账号剩余：{body.get('account_remaining_requests', '?')} 请求 / USD {body.get('account_remaining_cost_usd', '?')}",
+             f"授权条目：{len(authorizations)}"]
+    for row in authorizations:
+        lines.append(f"- {row.get('scope')}：{'启用' if row.get('enabled') else '关闭'} · 自动调度：{'是' if row.get('allow_scheduled') else '否'} · 剩余 {row.get('remaining_requests')} 请求 / USD {row.get('remaining_cost_usd')}")
+    if body.get("warning"):
+        lines.append(f"提示：{body['warning']}")
+    tool.emit(body, status=status, human="\n".join(lines))
+    return EXIT_OK
+
+
+def cmd_token(tool: Tool) -> int:
+    masked = mask_token(tool.token)
+    valid = None
+    if tool.token:
+        status, _, _ = tool.call("GET", "/api/agent/identity")
+        valid = status == 200
+    payload = {"configured": bool(tool.token), "masked_token": masked, "source": tool.token_source, "created_at": tool.token_created, "api_base": tool.api_base, "valid": valid, "token_file": str(token_file())}
+    if not tool.token:
+        return tool.fail(401, {"error": {"code": "AGENT_TOKEN_MISSING", "message": "未配置 Agent 令牌：请在设置页生成，或用 --token / OR_AGENT_TOKEN 提供。"}}, human=None)
+    human = f"Agent 令牌：{masked}（来源：{tool.token_source}）\n有效性：{'有效' if valid else '无效或已吊销'}\n令牌文件：{token_file()}"
+    tool.emit(payload, status=200 if valid else 401, human=human)
+    return EXIT_OK if valid else EXIT_UNAUTHORIZED
+
+
+def cmd_key_test(tool: Tool) -> int:
+    if (code := tool.require_token()) is not None:
+        return code
+    status, body, _ = tool.call("POST", "/api/agent/provider/test", payload={}, write=True)
+    if status != 200:
+        return tool.fail(status, body)
+    human = f"连接测试：{'通过' if body.get('ok') else '未通过'} · HTTP {body.get('http_status')} · {body.get('latency_ms')}ms\n{body.get('message')}\n密钥（掩码）：{body.get('masked_key')} · 来源：{body.get('key_source')}\n请求 ID：{tool.request_id}"
+    tool.emit(body, status=status, human=human)
+    return EXIT_OK
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", help="输出机器可读 JSON（ok/http_status/request_id/data）")
+    common.add_argument("--token", help="Agent 令牌（默认从本机私密配置读取）")
+    common.add_argument("--api-base", help="本机 API 地址（默认 127.0.0.1:<LOCAL_API_PORT>）")
+    common.add_argument("--timeout", type=float, default=60.0, help="网络超时秒数（默认 60）")
+    common.add_argument("--idempotency-key", help="自定义幂等键（写操作；默认每次自动生成）")
+    common.add_argument("--request-id", help="自定义请求 ID（默认自动生成，便于日志追踪）")
+
+    parser = argparse.ArgumentParser(prog="or", description="Opportunity Radar 本机 Agent 命令行（只连 127.0.0.1，需 Agent 令牌）", parents=[common])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("sources", parents=[common], help="平台目录与状态").set_defaults(func=cmd_sources)
+
+    identity = sub.add_parser("identity", parents=[common], help="查看/写入个人身份设定")
+    identity.add_argument("--set-file", help="用 JSON 文件替换身份设定")
+    identity.set_defaults(func=cmd_identity)
+
+    new = sub.add_parser("new", parents=[common], help="新建抓单雷达")
+    new.add_argument("--name", help="雷达名称（默认按业务预设命名）")
+    new.add_argument("--business", default="video", choices=sorted(BUSINESS_PRESETS), help="业务预设（默认 video）")
+    new.add_argument("--keywords", help="买方关键词，逗号/、分隔；含空格的整体短语视为一个关键词（最多 3 个）")
+    new.add_argument("--sources", help="平台 id，逗号分隔（如 xiaohongshu,douyin）")
+    new.add_argument("--hours", type=int, default=168, choices=HOURS_CHOICES, help="时间窗口小时数（默认 168＝最近7天）")
+    new.add_argument("--match-mode", default="remote", choices=MATCH_MODES, help="地区匹配模式（默认 remote 远程优先）")
+    new.add_argument("--regions", help="地区，逗号分隔（可选）")
+    new.add_argument("--roles", help="目标角色，逗号分隔（可选）")
+    new.add_argument("--intents", help="需求意图，逗号分隔（可选）")
+    new.add_argument("--exclude", help="排除词，逗号分隔（可选）")
+    new.add_argument("--goal", help="自定义目标描述（可选）")
+    new.add_argument("--start", help="自定义起始时间（ISO8601 含时区，与 --end 成对）")
+    new.add_argument("--end", help="自定义结束时间（ISO8601 含时区，与 --start 成对）")
+    new.set_defaults(func=cmd_new)
+
+    run = sub.add_parser("run", parents=[common], help="手动运行一轮（必须 --confirm；会触发真实付费采集）")
+    run.add_argument("radar_id")
+    run.add_argument("--confirm", action="store_true", help="确认本轮付费采集与预算上限")
+    run.set_defaults(func=cmd_run)
+
+    results = sub.add_parser("results", parents=[common], help="读取雷达结果（严格/待确认/不匹配 + 证据与链接）")
+    results.add_argument("radar_id")
+    results.add_argument("--status", choices=["strict", "pending", "mismatch"], help="只看某一匹配分类")
+    results.add_argument("--limit", type=int, default=20, help="每页条数（1–100，默认 20）")
+    results.add_argument("--offset", type=int, default=0, help="偏移（默认 0）")
+    results.set_defaults(func=cmd_results)
+
+    runs = sub.add_parser("runs", parents=[common], help="最近运行列表")
+    runs.add_argument("--radar", help="只看某个雷达的运行")
+    runs.add_argument("--limit", type=int, default=20, help="条数（1–100，默认 20）")
+    runs.set_defaults(func=cmd_runs)
+
+    status = sub.add_parser("status", parents=[common], help="预算与账本状态（只读）")
+    status.set_defaults(func=cmd_status)
+
+    token = sub.add_parser("token", parents=[common], help="显示令牌掩码与有效性（绝不显示明文）")
+    token.set_defaults(func=cmd_token)
+
+    key = sub.add_parser("key", parents=[common], help="Provider 密钥相关（key test＝官方免费端点连通性测试）")
+    key_sub = key.add_subparsers(dest="key_command", required=True)
+    key_test = key_sub.add_parser("test", parents=[common], help="测试 TikHub 连接（不采集内容，不显示明文）")
+    key_test.set_defaults(func=cmd_key_test)
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    tool = Tool(args)
+    try:
+        return args.func(tool)
+    except ServiceUnavailable as exc:
+        message = str(exc)
+        if tool.json_mode:
+            print(json.dumps({"ok": False, "http_status": 0, "request_id": tool.request_id, "api_base": tool.api_base, "error": {"code": "SERVICE_UNAVAILABLE", "message": message}}, ensure_ascii=False, indent=2))
+        else:
+            print(f"错误[SERVICE_UNAVAILABLE] {message}", file=sys.stderr)
+        return EXIT_OTHER
+
+
+if __name__ == "__main__":
+    sys.exit(main())
