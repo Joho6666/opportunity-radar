@@ -12,7 +12,7 @@ const groups: {title:string;items:[string,string,LucideIcon][]}[] = [
   {title:"机会与客户",items:[["机会列表","/opportunities",BriefcaseBusiness],["客户跟进","/pipeline",CircleUserRound],["已收藏","/saved",Bookmark]]},
   {title:"辅助与设置",items:[["机会技能","/skills",Sparkles],["我的画像","/profile",UserRound],["设置","/settings",Settings]]},
 ];
-const localItems: [string,string,LucideIcon][] = [["首页","/dashboard",House],["我的雷达","/radars",Radar],["情报收件箱","/evidence",Inbox],["设置","/settings",Settings]];
+const localItems: [string,string,LucideIcon][] = [["抓单工作台","/dashboard",House],["新建抓单","/radars/new",Radar],["买方候选 / 原文","/evidence",Inbox],["设置","/settings",Settings]];
 function Navigation({ onSelect }: { onSelect?: () => void }) {
   const path = usePathname();
   const local = process.env.NEXT_PUBLIC_APP_MODE === "local";
@@ -28,7 +28,7 @@ export function AppShell({children}:{children:React.ReactNode}) {
   const label=groups.flatMap(g=>g.items).find(([,href])=>path===href||path.startsWith(href+"/"))?.[0]??"工作台";
   const localLabel=localItems.find(([,href])=>path===href||path.startsWith(href+"/"))?.[0];
   return <div className="min-h-screen bg-ink"><a href="#main-content" className="sr-only z-[60] bg-white p-3 focus:not-sr-only focus:fixed">跳到主要内容</a>
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 border-r border-line bg-white px-3 py-5 lg:block"><Brand/><Navigation/><div className="absolute bottom-5 left-5 right-5 border-t border-line pt-4 text-xs leading-5 text-muted">{local?"本地运行 · 数据保存在本机":"公开需求 · 人工核实"}<br/>{local?"付费调用默认关闭":"让每次跟进都有依据"}</div></aside>
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 border-r border-line bg-white px-3 py-5 lg:block"><Brand/><Navigation/><div className="absolute bottom-5 left-5 right-5 border-t border-line pt-4 text-xs leading-5 text-muted">{local?"本地运行 · 数据保存在本机":"公开需求 · 人工核实"}<br/>{local?"手动采集 · 明确费用上限":"让每次跟进都有依据"}</div></aside>
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-2 border-b border-line bg-white px-4 lg:ml-56 lg:px-6"><div className="flex min-w-0 items-center gap-2"><Button variant="ghost" aria-label="打开导航" className="-ml-2 lg:hidden" onClick={()=>setOpen(true)}><Menu size={20}/></Button><span className="hidden text-sm text-muted sm:inline">{local?"本地工作台":"工作台"}</span><ChevronRight size={14} className="hidden text-muted sm:block"/><span className="truncate text-sm font-medium">{local?localLabel??"工作台":label}</span></div><div className="flex items-center gap-3 text-xs text-muted">{local?<span className="hidden sm:inline">Local Edition · 单用户</span>:<><span className="hidden sm:inline">账户会话</span><Link href="/profile" className="flex min-h-10 items-center gap-2 rounded-md px-1"><UserRound size={17}/><span className="max-w-24 truncate">{hydrated?profile.name||"未填写姓名":"加载中…"}</span></Link></>}</div></header>
     <DetailDrawer open={open} onClose={()=>setOpen(false)} title="工作台导航" className="right-auto left-0 max-w-[280px]"><div className="p-4"><Navigation onSelect={()=>setOpen(false)}/></div></DetailDrawer>
     <main id="main-content" className="min-w-0 p-4 sm:p-5 lg:ml-56 lg:p-6">{!local&&error&&<div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><span>数据加载或保存失败：{error}</span><Button variant="secondary" disabled={loading} onClick={()=>{void useOpportunityStore.getState().retry().catch(()=>undefined);}}>{loading?"重试中…":"重新加载数据"}</Button></div>}{children}</main>

@@ -23,3 +23,19 @@ export function hasUntrustedNextHeaders(headers: Headers, expectedHost: string, 
 
   return false;
 }
+
+/**
+ * Session bootstrap is a browser-only, same-origin operation. The custom
+ * header and JSON content type prevent simple cross-site form submissions;
+ * the exact Host/Origin and forwarding checks also reject proxy/DNS-rebinding
+ * style requests before a local session can be minted.
+ */
+export function isAllowedLocalSessionBootstrap(headers: Headers, expectedOrigin: string, expectedProtocol: string): boolean {
+  const origin = new URL(expectedOrigin);
+  return headers.get("host") === origin.host
+    && headers.get("origin") === expectedOrigin
+    && headers.get("x-local-session-init") === "1"
+    && headers.get("content-type")?.toLowerCase().startsWith("application/json") === true
+    && (!headers.has("sec-fetch-site") || headers.get("sec-fetch-site") === "same-origin")
+    && !hasUntrustedNextHeaders(headers, origin.host, expectedProtocol);
+}

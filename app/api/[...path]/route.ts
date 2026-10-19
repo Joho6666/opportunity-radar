@@ -22,7 +22,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     return NextResponse.json({ error: "本地 API 代理拒绝了此请求。" }, { status: 403 });
   }
   const session = verifyLocalSession(request.cookies.get(LOCAL_SESSION_COOKIE)?.value);
-  if (!session) return NextResponse.json({ error: "本机工作台会话已失效，请重新配对。" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "本机工作台会话已失效，请刷新页面自动恢复。" }, { status: 401 });
   if (!(["GET", "HEAD", "OPTIONS"].includes(request.method))) {
     if (request.headers.get("origin") !== origin || !request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
       return NextResponse.json({ error: "写入请求需要本机同源 JSON 请求。" }, { status: 403 });

@@ -13,17 +13,16 @@ function localRedirect(path: string) {
 
 export async function middleware(request: NextRequest) {
   if (process.env.NEXT_PUBLIC_APP_MODE === "local") {
-    const host = process.env.LOCAL_UI_ORIGIN ? new URL(process.env.LOCAL_UI_ORIGIN).host : "127.0.0.1:3004";
-    if (request.headers.get("host") !== host || hasUntrustedNextHeaders(request.headers, host, request.nextUrl.protocol)) return new NextResponse("Local Edition only accepts direct loopback requests.", { status: 403 });
+    const origin = process.env.LOCAL_UI_ORIGIN || "http://localhost:3004";
+    const host = new URL(origin).host;
+    if (request.headers.get("host") !== host || hasUntrustedNextHeaders(request.headers, host, request.nextUrl.protocol)
+        || (request.headers.has("origin") && request.headers.get("origin") !== origin)
+        || request.headers.get("sec-fetch-site") === "cross-site") return new NextResponse("Local Edition only accepts direct loopback requests.", { status: 403 });
     const path = request.nextUrl.pathname;
     if (path.startsWith("/api/")) return NextResponse.next();
-    const paired = Boolean(request.cookies.get("or_local_session")?.value);
-    if (path === "/" && paired) return localRedirect("/dashboard");
-    // A cookie may be expired or forged. Keep the pairing page reachable so the
-    // owner can create a fresh one-time ticket; API routes still verify the HMAC.
-    if (path === "/pair") return NextResponse.next();
-    if (!paired) return localRedirect("/pair");
-    if (path === "/login") return localRedirect("/dashboard");
+    // The client obtains its HttpOnly session through guarded same-origin POST.
+    // API routes still verify the signed session and CSRF token independently.
+    if (["/", "/pair", "/login"].includes(path)) return localRedirect("/dashboard");
     return NextResponse.next();
   }
   // Next dev adds x-forwarded-for from its socket. Bind dev to loopback; the API
