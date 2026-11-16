@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Opportunity Radar",
+    "description": "Read-only access to the local Opportunity Radar workbench, plus a board shortcut. Click Opportunity Radar board below the message composer to open the full board in the right Sidebar, or New window to open it in a browser tab. Reports service health, platform catalog, radar list, results, runs, billing and identity, and never triggers paid collection or prints the agent token. Sidebar mode requires opening Harness at localhost rather than 127.0.0.1.",
+    "detail": "docs/DETAIL.md"
+  }
+}
