@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36" role="img" aria-label="Opportunity Radar">
+  <circle cx="18" cy="18" r="11" fill="none" stroke="#3b82c4" stroke-width="2"/>
+  <circle cx="18" cy="18" r="7" fill="none" stroke="#3b82c4" stroke-width="1.6" opacity="0.8"/>
+  <circle cx="18" cy="18" r="3.2" fill="none" stroke="#3b82c4" stroke-width="1.4" opacity="0.6"/>
+  <path d="M18 18 L18 7 A11 11 0 0 1 26 11.5 Z" fill="#3b82c4" opacity="0.18"/>
+  <path d="M18 18 L26 11.5" fill="none" stroke="#3b82c4" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="18" cy="18" r="1.8" fill="#3b82c4"/>
+  <circle cx="24.5" cy="12.5" r="2.2" fill="#e8a33d"/>
+  <circle cx="11.5" cy="23.5" r="1.6" fill="#e8a33d" opacity="0.85"/>
+</svg>

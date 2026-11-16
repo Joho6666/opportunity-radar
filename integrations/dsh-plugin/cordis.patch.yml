@@ -1,0 +1,9 @@
+- insert:
+    - id: opportunity-radar
+      name: '@local/opportunity-radar'
+      config:
+        repoPath: /Users/joho/Documents/Codex/2026-10-13/opportunity-radar-ai-agent-github-https/work/opportunity-radar
+        appHome: /Users/joho/Library/Application Support/Opportunity Radar
+        apiPort: 8015
+        uiPort: 3004
+        timeoutMs: 12000
