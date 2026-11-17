@@ -6,9 +6,11 @@ description: Query the local Opportunity Radar workbench from DeepSeek Harness �
 # 机会雷达（DeepSeek Harness 只读接入）
 
 「机会雷达」是本机独立的 Local Edition 工作台（Next.js + FastAPI + PostgreSQL/Redis），
-**不是**这个插件自带的进程。本技能通过 `@local/opportunity-radar` bundle 提供的 7 个只读工具
-工作：其中 6 个代理仓库里的 `scripts/or` CLI，`radar_list` 直接调用后端已有的只读
-`GET /api/agent/radars`（CLI 没有 `radars` 子命令），鉴权用同一份 loopback 令牌且绝不输出。仓库：
+**不是**这个插件自带的进程。本技能通过 `@local/opportunity-radar` bundle 提供的
+**9 个只读工具 + 1 个付费搜索工具**工作：多数代理仓库里的 `scripts/or` CLI，
+`radar_list` / `radar_run_detail` / `radar_provider_diagnose` 直接调用后端只读接口
+（CLI 没有对应子命令），`radar_search` 走写接口建雷达+跑一轮。鉴权都用同一份 loopback
+令牌且绝不输出。仓库：
 
 ```
 /Users/joho/Documents/Codex/2026-10-13/opportunity-radar-ai-agent-github-https/work/opportunity-radar
@@ -40,26 +42,37 @@ Browser tab 会打开 `http://localhost:3004`，**完整 Next.js 工作台原样
 - 用户要挑平台、看预算账本、看最近运行、看个人身份设定。
 - 不适用于云端版；不适用于自动定时付费采集（该能力被有意关闭）。
 
-## 工具（全部只读）
+## 工具
 
-| 工具 | 作用 | 对应 CLI |
+| 工具 | 作用 | 对应接口 |
 |---|---|---|
 | `radar_status` | **先调它**。探测 8015 的 `/ready` 与 3004、检查 `scripts/or`、私有配置与令牌文件是否齐全；就绪时返回预算账本 | `or status --json` |
+| `radar_search` | **一次调用完成「搜索」**：建普通模式雷达 → 跑一轮 → 等到结束 → 返回结果。付费，必须 `confirm: true` | `POST /radars` + `/run` |
 | `radar_sources` | 平台目录：可用 / 已实测 / 单价 / 状态（保留全部平台，省略端点与能力明细） | `or sources --json` |
 | `radar_list` | **雷达列表**（`limit`/`offset` 分页，或传 `radar_id` 读单个）：拿 `radar_id` 的正规入口。列表只给名称/状态/关键词/平台/时间等字段，单条才带完整 `source_config` | `GET /api/agent/radars` |
 | `radar_results` | 某雷达的结果（`strict` / `pending` / `mismatch` / `hiring_signal` + 证据 + 原文链接 + 发布时间） | `or results <id> --json` |
 | `radar_runs` | 最近运行列表与阶段统计 | `or runs --json` |
+| `radar_run_detail` | **单次运行详情**：状态、时间、`stats`、逐源 `requests/returned/ingested` 与采集错误 | `GET /api/agent/runs/{id}` |
+| `radar_provider_diagnose` | **付费平台为什么不可用**：可用 / 缺 key / 缺单价核验的清单，附查价页与写入规则 | `GET /api/agent/sources` |
 | `radar_identity` | 读取个人身份设定（不写入） | `or identity --json` |
 | `radar_token_status` | 令牌掩码与有效性（**绝不显示明文**） | `or token --json` |
+
+`radar_search` 是唯一会花钱的工具：它必须显式 `confirm: true`，单次花费受 provider 配置上限
+约束（默认 $0.10），并会**保留**新建的雷达（agent 接口没有删除入口，删雷达只能去界面）。
+它建的是普通模式雷达（`required_terms` 为空），因为 CLI 的 `or new` 会写死 `lead_hunt` 与
+业务必需词（视频/电商/带货…），那会把「单片机毕设」这类内容帖全过滤掉。
 
 每个工具都返回 `state`：`online` / `degraded` / `offline` / `misconfigured`，以及 `checks`、
 `error.code`、`data` 和一段可执行的 `hint`。**先把 `state` 和 `hint` 如实告诉用户，不要把离线包装成"没有数据"。**
 `degraded` 表示 API 进程在、但后台依赖（PostgreSQL 54330 / Redis 6380）没起来 —— 最常见的原因是
 Docker Desktop 重启后容器没自启，**不是**配置或令牌问题，别让用户去重新生成令牌。
+参数被拒（如 `CONFIRM_REQUIRED`、`RADAR_NOT_FOUND`）仍然是 `online`：服务是好的，是这次请求不合法。
 
 ## 安全红线（必须遵守）
 
-- **付费运行只能由人工确认触发**：`or run` 必须带 `--confirm`。本插件**故意不暴露** `new`/`run`/`key` 等写操作或付费工具；用户确认后请在终端手动执行，不要为了跑通而改预算、放开调度或绕过计费。
+- **付费运行只能由用户明确确认触发**：终端 `or run` 必须带 `--confirm`；插件里唯一会花钱的是
+  `radar_search`，它必须收到 `confirm: true`，且单次花费受 provider 上限约束。除此之外本插件
+  **不暴露** `key` / 预算修改 / 删雷达 / 改身份等写操作。不要为了跑通而改预算、放开调度或绕过计费。
 - **不碰密钥明文**：任何时刻不要读取并输出 `provider-config.json`、`agent-token.json`、`local.env` 的内容；令牌只回掩码。令牌丢失让用户去设置页重置，不要写进日志、提交或聊天记录。
 - **只连 loopback**：不要用端口转发 / 代理 / 公网地址访问 3004 或 8015。
 - **写操作重试必须复用同一 `Idempotency-Key`**，否则会产生第二次运行。本插件不做写操作，这条用于手动执行 CLI 时。
@@ -128,8 +141,12 @@ API `http://127.0.0.1:8015`。
 ## 预热顺序
 
 ```
-radar_status  →  radar_token_status  →  radar_list  →  radar_sources  →  radar_results / radar_runs
+radar_status  →  radar_token_status  →  radar_provider_diagnose  →  radar_sources
+             →  radar_search（付费，需确认）  →  radar_results / radar_runs / radar_run_detail
 ```
+
+用户说「帮我找某关键词的最新帖子」时，直接 `radar_search`（默认小红书，1 次请求约 $0.01）；
+若报 `SOURCE_NOT_AVAILABLE`，先跑 `radar_provider_diagnose` 看是缺 key 还是缺端点单价核验。
 
 不要靠猜 `radar_id`：先用 `radar_list` 拿列表（`limit`/`offset` 翻页，或传 `radar_id` 读单个），
 再用 `radar_results` 读该雷达的结果。

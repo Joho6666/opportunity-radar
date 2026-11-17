@@ -52,8 +52,9 @@ assert.deepEqual(inject, ['tools', 'skills']);
 apply(ctx, config);
 
 const expected = [
-  'radar_status', 'radar_sources', 'radar_list', 'radar_results',
-  'radar_runs', 'radar_identity', 'radar_token_status',
+  'radar_status', 'radar_search', 'radar_sources', 'radar_list', 'radar_results',
+  'radar_runs', 'radar_run_detail', 'radar_provider_diagnose', 'radar_identity',
+  'radar_token_status',
 ];
 assert.deepEqual([...tools.keys()].sort(), [...expected].sort());
 console.log(`PASS: ${tools.size} read-only tools registered`);
@@ -125,6 +126,7 @@ const cases = [
   ['radar_list', { limit: 100 }],
   ['radar_results', { radar_id: '00000000-0000-0000-0000-000000000000', limit: 5, status: 'strict' }],
   ['radar_runs', { limit: 5 }],
+  ['radar_provider_diagnose', {}],
   ['radar_identity', {}],
   ['radar_token_status', {}],
 ];
@@ -188,6 +190,29 @@ if (status.state === 'online') {
     }
     console.log(`\nPASS: radar_list total=${total}, sources kept ${sources.data.items.length}/${platformCount} platforms`);
   }
+}
+
+// The paid search tool must refuse without an explicit confirm, spending nothing.
+const search = await tools.get('radar_search').execute({ query: '单片机' }, { signal: new AbortController().signal });
+assert.equal(search.ok, false);
+assert.equal(search.error.code, 'CONFIRM_REQUIRED');
+assert.equal(search.state, 'online', 'a rejected request must not be reported as a configuration fault');
+assert.ok(!/or_agent_[A-Za-z0-9_-]{16,}/.test(JSON.stringify(search)), 'search must never emit the token');
+console.log('PASS: radar_search refuses without confirm=true (no collection, no charge)');
+
+// A concrete run detail is readable, and the diagnose tool tallies platforms.
+const diagnose = results.get('radar_provider_diagnose');
+if (diagnose && diagnose.ok) {
+  assert.ok(diagnose.data.tally && typeof diagnose.data.tally.total === 'number', 'diagnose must tally platforms');
+  console.log(`PASS: radar_provider_diagnose ready=${diagnose.data.tally.ready} missing_price=${diagnose.data.tally.missing_price} missing_key=${diagnose.data.tally.missing_key}`);
+}
+const runsResult = results.get('radar_runs');
+const firstRun = runsResult && Array.isArray(runsResult.data.items) ? runsResult.data.items[0] : null;
+if (firstRun && firstRun.id) {
+  const detail = await tools.get('radar_run_detail').execute({ run_id: firstRun.id }, { signal: new AbortController().signal });
+  assert.equal(detail.ok, true, 'radar_run_detail must succeed for an existing run');
+  assert.equal(String(detail.data.run && detail.data.run.id), String(firstRun.id), 'run detail must return the requested run');
+  console.log(`PASS: radar_run_detail read run ${String(firstRun.id).slice(0, 8)}… (status=${detail.data.run.status})`);
 }
 
 console.log('\nALL SMOKE CHECKS PASSED');

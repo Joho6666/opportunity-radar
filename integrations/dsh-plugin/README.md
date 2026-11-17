@@ -12,7 +12,7 @@ DeepSeek Harness 插件（bundle）：把本机 **Opportunity Radar Local Editio
 
 | 文件 | 作用 |
 |---|---|
-| `index.js` | Host 插件：注册 7 个只读工具 + 1 个技能 provider |
+| `index.js` | Host 插件：注册 9 个只读工具 + 1 个付费搜索工具 + 1 个技能 provider |
 | `client.js` | Client 插件：在输入框停靠区放「机会雷达看板」+「新窗口」两个入口，文案走 Client locale |
 | `cordis.patch.yml` | 插入一行 `opportunity-radar`，配置仓库路径、App Home 与端口 |
 | `assets/opportunity-radar.md` | 技能正文（用法、安全红线、degraded/offline 排障步骤） |
@@ -54,14 +54,23 @@ URL）。插件已做自适应：在 `localhost` 下自动弹出侧栏；在 `12
 
 ## 工具
 
-`radar_status`、`radar_sources`、`radar_list`、`radar_results`、`radar_runs`、`radar_identity`、
-`radar_token_status`。
+9 个只读工具 + 1 个付费搜索工具：
 
-全部只读，绝不输出令牌明文，**不暴露** `new` / `run` / `key` 等写操作或付费采集入口。
-付费运行必须由用户明确确认后在终端手动执行 `scripts/or run <雷达ID> --confirm`。
+`radar_status`、`radar_search`、`radar_sources`、`radar_list`、`radar_results`、`radar_runs`、
+`radar_run_detail`、`radar_provider_diagnose`、`radar_identity`、`radar_token_status`。
 
-`radar_list` 是唯一直接走 HTTP 的工具（`GET /api/agent/radars`，因为 CLI 没有该子命令）；
-它用同一份 loopback 令牌鉴权，令牌值不进入返回值、日志或错误信息。
+**`radar_search` 是唯一会花钱的工具**：`{query, confirm: true}` → 建普通模式雷达 → 跑一轮 →
+等到结束 → 返回结果（时间/来源/标题/链接）。单次花费受 provider 配置上限约束（默认 $0.10）。
+它建的是 `required_terms` 为空的普通雷达，绕开 `scripts/or new` 写死的 `lead_hunt` + 业务必需词
+（否则「单片机毕设」这类内容帖会被「视频/电商/带货」过滤光）。agent 接口没有删除入口，搜索建的
+雷达会保留（去界面删）。
+
+其余全部只读，绝不输出令牌明文，**不暴露** `key` / 预算修改 / 删雷达 / 改身份等写操作。
+终端付费运行仍需人工 `scripts/or run <雷达ID> --confirm`。
+
+`radar_list`、`radar_run_detail`、`radar_provider_diagnose` 直接走 HTTP（`/api/agent/radars`、
+`/api/agent/runs/{id}`、`/api/agent/sources`，CLI 没有对应子命令），用同一份 loopback 令牌鉴权，
+令牌值不进入返回值、日志或错误信息。
 
 结果过大时不再「只留 3 条」：`radar_list` 只投影列表字段（完整配置用 `radar_id` 读单个），
 `radar_sources` 只投影关键字段并保留全部平台行，两者都全量保留并标记 `reduced: true`；
